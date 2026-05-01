@@ -1,0 +1,196 @@
+<main class="shell">
+  <section class="hero">
+    <div>
+      <p class="eyebrow">Angular frontend skeleton</p>
+      <h1>{{ title }}</h1>
+      <p class="lede">
+        Minimal operator console for scheduled ranking runs, historical recommendation review,
+        and post-run performance comparison.
+      </p>
+    </div>
+    <div class="hero-actions">
+      <button type="button" class="primary" (click)="refreshRuns()">Refresh Runs</button>
+      <label class="horizon-input">
+        <span>Horizons</span>
+        <input
+          #horizonBox
+          type="text"
+          [value]="horizons()"
+          placeholder="1,5,10,21"
+          (keyup.enter)="applyHorizons(horizonBox.value)"
+          (blur)="applyHorizons(horizonBox.value)"
+        />
+      </label>
+    </div>
+  </section>
+
+  <section class="status-grid">
+    <article class="status-card">
+      <span>Backend</span>
+      <strong>{{ backendConfig() ? 'Connected' : 'Unavailable' }}</strong>
+      <small>{{ backendConfig()?.db_path || 'Waiting for /api/config' }}</small>
+    </article>
+    <article class="status-card">
+      <span>Stored Runs</span>
+      <strong>{{ runs().length }}</strong>
+      <small>Latest 30 executions from SQLite</small>
+    </article>
+    <article class="status-card">
+      <span>Selected Run</span>
+      <strong>{{ selectedRun()?.id || 'None' }}</strong>
+      <small>{{ selectedRun()?.signal_date || 'Choose a run from the left panel' }}</small>
+    </article>
+  </section>
+
+  @if (loadError()) {
+    <section class="notice error">{{ loadError() }}</section>
+  }
+
+  <section class="workspace">
+    <aside class="panel run-list">
+      <div class="panel-head">
+        <h2>Run History</h2>
+        <span>{{ isLoadingRuns() ? 'Loading...' : 'Ready' }}</span>
+      </div>
+
+      @if (runs().length === 0) {
+        <div class="empty-state">
+          <p>No runs stored yet.</p>
+          <p>Create a schedule or trigger a manual run from the backend API first.</p>
+        </div>
+      } @else {
+        <div class="run-items">
+          @for (run of runs(); track run.id) {
+            <button
+              type="button"
+              class="run-item"
+              [class.active]="selectedRunId() === run.id"
+              (click)="selectRun(run.id)"
+            >
+              <div class="run-item-top">
+                <strong>#{{ run.id }}</strong>
+                <span class="badge" [class.succeeded]="run.status === 'succeeded'" [class.failed]="run.status === 'failed'" [class.running]="run.status === 'running'" [class.queued]="run.status === 'queued'">{{ run.status }}</span>
+              </div>
+              <div class="run-item-meta">
+                <span>{{ run.signal_date || 'No signal date yet' }}</span>
+                <span>{{ run.trigger_source }}</span>
+              </div>
+              <div class="run-item-meta">
+                <span>{{ (run.started_at || run.created_at) | date:'yyyy-MM-dd HH:mm:ss' }}</span>
+                <span>{{ run.row_count || 0 }} rows</span>
+              </div>
+            </button>
+          }
+        </div>
+      }
+    </aside>
+
+    <section class="panel details">
+      <div class="panel-head">
+        <h2>Run Details</h2>
+        <span>{{ isLoadingDetails() ? 'Loading...' : 'Ready' }}</span>
+      </div>
+
+      @if (detailError()) {
+        <div class="notice error">{{ detailError() }}</div>
+      } @else if (!selectedRunData()) {
+        <div class="empty-state">
+          <p>Select a run to inspect recommendations and forward returns.</p>
+        </div>
+      } @else {
+        <div class="detail-block">
+          <div class="detail-grid">
+            <article>
+              <span>Status</span>
+              <strong>{{ selectedRunData()!.run.status }}</strong>
+            </article>
+            <article>
+              <span>Signal Date</span>
+              <strong>{{ selectedRunData()!.run.signal_date || 'N/A' }}</strong>
+            </article>
+            <article>
+              <span>Source</span>
+              <strong>{{ selectedRunData()!.run.trigger_source }}</strong>
+            </article>
+            <article>
+              <span>CSV</span>
+              <strong>{{ selectedRunData()!.run.ranking_csv_path || 'N/A' }}</strong>
+            </article>
+          </div>
+        </div>
+
+        <div class="detail-block">
+          <h3>Performance Summary</h3>
+          <div class="summary-grid">
+            @for (label of objectKeys(selectedRunData()!.summary); track label) {
+              <article class="summary-card">
+                <span>{{ label }}</span>
+                <strong>
+                  {{
+                    selectedRunData()!.summary[label].avg_return_pct === null
+                      ? 'N/A'
+                      : (selectedRunData()!.summary[label].avg_return_pct | number:'1.2-2') + '%'
+                  }}
+                </strong>
+                <small>
+                  Win rate:
+                  {{
+                    selectedRunData()!.summary[label].win_rate_pct === null
+                      ? 'N/A'
+                      : (selectedRunData()!.summary[label].win_rate_pct | number:'1.0-1') + '%'
+                  }}
+                </small>
+              </article>
+            }
+          </div>
+        </div>
+
+        <div class="detail-block">
+          <h3>Recommendations</h3>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Symbol</th>
+                  <th>Entry</th>
+                  <th>Score</th>
+                  <th>1D</th>
+                  <th>5D</th>
+                  <th>10D</th>
+                  <th>21D</th>
+                  <th>Latest</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (row of selectedRunData()!.recommendations; track row.rank) {
+                  <tr>
+                    <td>{{ row.rank }}</td>
+                    <td>{{ row.symbol }}</td>
+                    <td>{{ row.entry_price === null ? 'N/A' : (row.entry_price | number:'1.2-2') }}</td>
+                    <td>{{ row.score | number:'1.4-4' }}</td>
+                    <td [class]="performanceClass(row.performance?.['1d'])">
+                      {{ row.performance?.['1d'] ? (row.performance?.['1d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}
+                    </td>
+                    <td [class]="performanceClass(row.performance?.['5d'])">
+                      {{ row.performance?.['5d'] ? (row.performance?.['5d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}
+                    </td>
+                    <td [class]="performanceClass(row.performance?.['10d'])">
+                      {{ row.performance?.['10d'] ? (row.performance?.['10d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}
+                    </td>
+                    <td [class]="performanceClass(row.performance?.['21d'])">
+                      {{ row.performance?.['21d'] ? (row.performance?.['21d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}
+                    </td>
+                    <td [class]="performanceClass(row.performance?.['latest'])">
+                      {{ row.performance?.['latest'] ? (row.performance?.['latest']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+      }
+    </section>
+  </section>
+</main>

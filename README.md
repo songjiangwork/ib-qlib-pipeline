@@ -189,6 +189,36 @@ cd /home/song/projects/ib-qlib-pipeline
 ./stop_backend.sh
 ```
 
+### 最小 Angular 前端骨架
+
+前端工程在 `frontend/`，默认开发端口固定为 `9991`，并将 `/api` 代理到后端 `http://127.0.0.1:8001`。
+
+启动前端：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+./start_frontend.sh
+```
+
+停止前端：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+./stop_frontend.sh
+```
+
+也可以直接在前端目录运行：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline/frontend
+npm start
+```
+
+访问地址：
+
+- `http://127.0.0.1:9991`
+- `http://127.0.0.1:9991/api/...` 会自动代理到后端
+
 默认监听：
 
 - `http://127.0.0.1:8000`
