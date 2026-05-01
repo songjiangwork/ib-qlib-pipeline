@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 data/
+data/app/
 config.yaml
 mlruns/
 reports/

@@ -150,3 +150,108 @@ python ib_qlib_pipeline/sec_features.py \
 PYTHONPATH=/home/song/projects/ib-qlib-pipeline /home/song/projects/qlib/.venv/bin/qrun \
   examples/workflow_us_lgb_2020_sec_port.yaml
 ```
+
+## 10. Backend API（调度 / 历史查询 / 推荐表现）
+
+后端会做三件事：
+
+- 定时或手动触发 `run_daily_ranking.sh`
+- 将每次运行的推荐结果保存到 SQLite
+- 提供 API 查询任意一次运行的推荐列表，以及后续 1 / 5 / 10 / 21 个交易日和截至最新收盘的涨跌表现
+
+### 安装新增依赖
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 启动后端
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+python run_backend.py
+```
+
+或者直接后台启动：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+./start_backend.sh
+```
+
+停止后台服务：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+./stop_backend.sh
+```
+
+默认监听：
+
+- `http://127.0.0.1:8000`
+- OpenAPI 文档：`http://127.0.0.1:8000/docs`
+
+默认 SQLite 路径：
+
+- `data/app/ranking_service.db`
+
+可选环境变量：
+
+- `RANKING_API_DB_PATH`
+- `RANKING_API_TIMEZONE`
+- `RANKING_API_HOST`
+- `RANKING_API_PORT`
+- `RANKING_API_RUN_SCRIPT`
+
+### 主要 API
+
+1. 创建一个工作日定时任务（例如每天 09:35 跑一次）
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/schedules \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "weekday-open-run",
+    "hour": 9,
+    "minute": 35,
+    "day_of_week": "mon-fri",
+    "timezone": "America/Edmonton",
+    "client_id": 151,
+    "lookback_days": 7,
+    "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+    "enabled": true
+  }'
+```
+
+2. 手动触发一次运行
+
+```bash
+curl -X POST http://127.0.0.1:8000/api/runs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "client_id": 151,
+    "lookback_days": 7,
+    "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"
+  }'
+```
+
+3. 查看历史运行列表
+
+```bash
+curl "http://127.0.0.1:8000/api/runs?limit=20"
+```
+
+4. 查看某一次运行的推荐列表和后验表现
+
+```bash
+curl "http://127.0.0.1:8000/api/runs/1/recommendations?horizons=1,5,10,21"
+```
+
+返回结果里每个推荐会附带：
+
+- `1d`, `5d`, `10d`, `21d`：按交易日向后看的收益
+- `latest`：从当时推荐价格到当前最新收盘价的收益
+- `summary`：该次推荐整体的平均收益率和胜率
