@@ -231,6 +231,12 @@ cd /home/song/projects/ib-qlib-pipeline
 
 前端工程在 `frontend/`，默认监听 `9991`，并将 `/api` 代理到后端。
 
+当前前端使用：
+
+- Angular
+- `lightweight-charts` 用于交互式日线 K 线图
+- 内置中英文切换
+
 启动：
 
 ```bash
@@ -255,6 +261,7 @@ npm start
 访问：
 
 - `http://127.0.0.1:9991/rankings`
+- `http://127.0.0.1:9991/compare`
 - `http://127.0.0.1:9991/symbols/<SYMBOL>`
 
 ### 10.4 SQLite schema
@@ -304,6 +311,11 @@ Ranking date 列表：
 - `GET /api/ranking-dates?limit=20&offset=0`
 - `GET /api/ranking-dates?query=2026-01&limit=20&offset=0`
 
+价格数据：
+
+- `GET /api/prices/{symbol}`
+- `GET /api/prices/{symbol}/bars?interval=1d`
+
 Portfolio：
 
 - `GET /api/portfolio-runs`
@@ -318,6 +330,7 @@ Portfolio：
 curl "http://127.0.0.1:8001/api/ranking-dates?limit=20&offset=0"
 curl "http://127.0.0.1:8001/api/runs/1/recommendations?horizons=1,5,10,21"
 curl "http://127.0.0.1:8001/api/portfolio-runs/1/symbols/COIN"
+curl "http://127.0.0.1:8001/api/prices/NVDA/bars?interval=1d"
 ```
 
 ### 10.6 历史 ranking 回填
@@ -387,7 +400,7 @@ python simulate_portfolio.py \
 
 ### 10.8 当前前端页面
 
-当前 Angular UI 主要是两页：
+当前 Angular UI 主要是三页：
 
 `/rankings`
 - 左侧边栏：
@@ -399,11 +412,33 @@ python simulate_portfolio.py \
   - 买入 / 持有状态
   - 简单 summary
 
+`/compare`
+- 选择当前 `portfolio run` 下的多只股票
+- 比较：
+  - 入选次数
+  - 已平仓 / 未平仓批次
+  - 平均持有天数
+  - 胜率
+  - 平均收益率
+  - 已实现盈亏
+- 点击股票代码可跳转到对应股票详情页
+
 `/symbols/:symbol`
 - 查看该股票在当前 `portfolio run` 下的完整生命周期
 - 包括：
+  - 交互式日线 K 线图
+  - `1M / 3M / 6M / 1Y / All` 时间范围切换
+  - 图上的买卖标记
+  - `Trade Events` 表
   - 所有 lots
   - entry / exit
   - realized pnl
   - 每日 marks
   - 是否仍在 `TOP20 / TOP10`
+
+补充说明：
+
+- 当前 K 线图数据来自本地 `data/processed/qlib_csv/<SYMBOL>.csv`
+- 当前只支持 `1d` interval
+- 如果以后补充小时级数据，可以继续扩展为 `1h / 15m`
+- 当前图表展示的是与你本地历史数据一致的价格序列；若未来需要显式支持拆股 / 并股事件与原始未复权价格，需要额外保存真实 corporate action / factor 信息

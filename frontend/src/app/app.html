@@ -1,35 +1,60 @@
 <main class="shell">
   <aside class="sidebar">
     <div class="brand">
-      <p class="eyebrow">Operator Console</p>
+      <p class="eyebrow">{{ i18n.t('operatorConsole') }}</p>
       <h1>IB Qlib</h1>
-      <p class="muted">Daily ranking review and symbol lifecycle drill-down.</p>
+      <p class="muted">{{ i18n.t('consoleSubtitle') }}</p>
     </div>
 
     <nav class="nav-tabs">
-      <a routerLink="/rankings" routerLinkActive="active">Daily Rankings</a>
+      <a routerLink="/rankings" routerLinkActive="active">{{ i18n.t('dailyRankings') }}</a>
+      <a routerLink="/compare" routerLinkActive="active">{{ i18n.t('compareStocks') }}</a>
       <a
         [routerLink]="state.symbolsInRun().length ? ['/symbols', state.symbolsInRun()[0]] : ['/rankings']"
         routerLinkActive="active"
       >
-        Symbol Detail
+        {{ i18n.t('symbolDetail') }}
       </a>
     </nav>
 
     <section class="side-block">
       <div class="side-head">
-        <h2>Backend</h2>
+        <h2>{{ i18n.t('language') }}</h2>
       </div>
-      <div class="meta-card">
-        <strong>{{ state.backendConfig() ? 'Connected' : 'Unavailable' }}</strong>
-        <small>{{ state.backendConfig()?.db_path || 'Waiting for /api/config' }}</small>
+      <div class="lang-switch">
+        <button
+          type="button"
+          class="lang-button"
+          [class.active]="i18n.language() === 'zh'"
+          (click)="setLanguage('zh')"
+        >
+          {{ i18n.t('chinese') }}
+        </button>
+        <button
+          type="button"
+          class="lang-button"
+          [class.active]="i18n.language() === 'en'"
+          (click)="setLanguage('en')"
+        >
+          {{ i18n.t('english') }}
+        </button>
       </div>
     </section>
 
     <section class="side-block">
       <div class="side-head">
-        <h2>Portfolio Runs</h2>
-        <span>{{ state.isLoading() ? 'Loading...' : state.portfolioRuns().length }}</span>
+        <h2>{{ i18n.t('backend') }}</h2>
+      </div>
+      <div class="meta-card">
+        <strong>{{ state.backendConfig() ? i18n.t('connected') : i18n.t('unavailable') }}</strong>
+        <small>{{ state.backendConfig()?.db_path || i18n.t('waitingConfig') }}</small>
+      </div>
+    </section>
+
+    <section class="side-block">
+      <div class="side-head">
+        <h2>{{ i18n.t('portfolioRuns') }}</h2>
+        <span>{{ state.isLoading() ? i18n.t('loading') : state.portfolioRuns().length }}</span>
       </div>
       <div class="stack">
         @for (run of state.portfolioRuns(); track run.id) {
@@ -49,7 +74,7 @@
 
     <section class="side-block">
       <div class="side-head">
-        <h2>Ranking Dates</h2>
+        <h2>{{ i18n.t('rankingDates') }}</h2>
         <span>{{ state.rankingDatesTotal() }}</span>
       </div>
       <input
@@ -57,7 +82,7 @@
         class="side-input"
         type="text"
         [value]="state.rankingDateFilter()"
-        placeholder="Filter date, e.g. 2026-04"
+        [placeholder]="i18n.t('filterDate')"
         (input)="onRankingDateFilter(dateBox.value)"
       />
       <div class="stack compact" (scroll)="onRankingDatesScroll($event)">
@@ -73,20 +98,20 @@
           </button>
         }
         @if (state.rankingDatesLoading()) {
-          <div class="list-status">Loading…</div>
+          <div class="list-status">{{ i18n.t('loadingMore') }}</div>
         } @else if (state.rankingDatesHasMore()) {
           <button type="button" class="load-more" (click)="loadMoreRankingDates()">
-            Load 20 More
+            {{ i18n.t('load20More') }}
           </button>
         } @else if (state.rankingDates().length > 0) {
-          <div class="list-status muted">End of list</div>
+          <div class="list-status muted">{{ i18n.t('endOfList') }}</div>
         }
       </div>
     </section>
 
     <section class="side-block">
       <div class="side-head">
-        <h2>Symbols</h2>
+        <h2>{{ i18n.t('symbols') }}</h2>
         <span>{{ state.symbolsInRun().length }}</span>
       </div>
       <input
@@ -94,7 +119,7 @@
         class="side-input"
         type="text"
         [value]="state.symbolFilter()"
-        placeholder="Search symbol"
+        [placeholder]="i18n.t('searchSymbol')"
         (input)="onSymbolFilter(symbolBox.value)"
       />
       <div class="symbol-list">

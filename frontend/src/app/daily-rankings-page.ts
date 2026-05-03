@@ -2,6 +2,7 @@ import { CommonModule, DecimalPipe } from '@angular/common';
 import { Component, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 
+import { FrontendI18nService } from './frontend-i18n.service';
 import { FrontendStateService } from './frontend-state.service';
 
 @Component({
@@ -12,6 +13,7 @@ import { FrontendStateService } from './frontend-state.service';
   styleUrl: './daily-rankings-page.css',
 })
 export class DailyRankingsPage {
+  protected readonly i18n = inject(FrontendI18nService);
   protected readonly state = inject(FrontendStateService);
   private readonly router = inject(Router);
 

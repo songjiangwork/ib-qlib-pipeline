@@ -1,14 +1,14 @@
 <section class="page">
   <div class="page-head">
     <div>
-      <p class="eyebrow">By Day</p>
-      <h2>Daily Rankings</h2>
+      <p class="eyebrow">{{ i18n.t('byDay') }}</p>
+      <h2>{{ i18n.t('dailyRankings') }}</h2>
       <p class="muted">
-        View the selected signal day's TOP20 list, then jump into a symbol lifecycle page.
+        {{ i18n.t('dailyRankingsSubtitle') }}
       </p>
     </div>
     <div class="summary">
-      <span>Signal</span>
+      <span>{{ i18n.t('signal') }}</span>
       <strong>{{ state.selectedRunData()?.run?.signal_date || 'N/A' }}</strong>
     </div>
   </div>
@@ -20,7 +20,7 @@
   <div class="grid">
     <section class="panel">
       <div class="panel-head">
-        <h3>TOP20 Snapshot</h3>
+        <h3>{{ i18n.t('top20Snapshot') }}</h3>
         <span>{{ top20().length }} rows</span>
       </div>
       <div class="table-wrap">
@@ -28,12 +28,12 @@
           <thead>
                 <tr>
                   <th>Rank</th>
-                  <th>Symbol</th>
-                  <th>Action</th>
-                  <th>Held</th>
-                  <th>Score</th>
-                  <th>Percentile</th>
-                  <th>Reference Close</th>
+                  <th>{{ i18n.t('symbol') }}</th>
+                  <th>{{ i18n.t('action') }}</th>
+                  <th>{{ i18n.t('held') }}</th>
+                  <th>{{ i18n.t('score') }}</th>
+                  <th>{{ i18n.t('percentile') }}</th>
+                  <th>{{ i18n.t('referenceClose') }}</th>
               <th>1D</th>
               <th>Latest</th>
             </tr>
@@ -49,16 +49,16 @@
                     </td>
                     <td>
                       @if (state.isBoughtOnSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
-                        <span class="flag buy">Buy Next Open</span>
+                        <span class="flag buy">{{ i18n.t('buyNextOpen') }}</span>
                       } @else {
-                        <span class="flag hold-soft">Carry</span>
+                        <span class="flag hold-soft">{{ i18n.t('carry') }}</span>
                       }
                     </td>
                     <td>
                       @if (state.isHeldAfterSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
-                        <span class="flag hold">Held</span>
+                        <span class="flag hold">{{ i18n.t('heldYes') }}</span>
                       } @else {
-                        <span class="flag flat">Flat</span>
+                        <span class="flag flat">{{ i18n.t('flat') }}</span>
                       }
                     </td>
                     <td>{{ row.score | number:'1.4-4' }}</td>
@@ -75,7 +75,7 @@
 
     <section class="panel summary-panel">
       <div class="panel-head">
-        <h3>Run Summary</h3>
+        <h3>{{ i18n.t('runSummary') }}</h3>
       </div>
       @if (state.selectedRunData()) {
         <div class="summary-cards">
@@ -90,7 +90,7 @@
                 }}
               </strong>
               <small>
-                Win rate:
+                {{ i18n.t('winRate') }}:
                 {{
                   state.selectedRunData()!.summary[label]?.win_rate_pct === null
                     ? 'N/A'
@@ -101,7 +101,7 @@
           }
         </div>
       } @else {
-        <div class="empty">Select a ranking date from the sidebar.</div>
+        <div class="empty">{{ i18n.t('selectRankingDate') }}</div>
       }
     </section>
   </div>

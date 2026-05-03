@@ -60,6 +60,10 @@ th {
   gap: 16px;
 }
 
+.panel {
+  padding: 18px;
+}
+
 .summary-card {
   padding: 14px;
 }
@@ -79,6 +83,85 @@ th {
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(255, 255, 255, 0.56);
+}
+
+.chart-meta {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.chart-toolbar {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.toolbar-group span {
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+  margin-right: 4px;
+}
+
+.chart-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.56);
+  font: inherit;
+  cursor: pointer;
+}
+
+.chart-button.active {
+  border-color: rgba(12, 122, 90, 0.4);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chart-meta div {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.56);
+}
+
+.chart-meta span {
+  display: block;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.76rem;
+}
+
+.chart-meta strong {
+  display: block;
+  margin-top: 6px;
+  font-size: 1.15rem;
+}
+
+.chart-shell {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background:
+    linear-gradient(180deg, rgba(12, 122, 90, 0.08), rgba(12, 122, 90, 0.01)),
+    rgba(255, 255, 255, 0.56);
+  padding: 14px;
+}
+
+.price-chart-host {
+  width: 100%;
+  height: 420px;
+  display: block;
 }
 
 table {
@@ -122,7 +205,8 @@ td {
 
 @media (max-width: 760px) {
   .summary-grid,
-  .lot-head {
+  .lot-head,
+  .chart-meta {
     grid-template-columns: 1fr;
   }
 }

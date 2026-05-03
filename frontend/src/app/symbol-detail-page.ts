@@ -1,10 +1,30 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { Component, computed, effect, inject } from '@angular/core';
+import { Component, ElementRef, ViewChild, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { ActivatedRoute } from '@angular/router';
+import {
+  CandlestickSeries,
+  ColorType,
+  IChartApi,
+  LineSeries,
+  PriceScaleMode,
+  Time,
+  createChart,
+  createSeriesMarkers,
+} from 'lightweight-charts';
 import { map } from 'rxjs/operators';
 
-import { FrontendStateService, PortfolioMark } from './frontend-state.service';
+import { FrontendI18nService } from './frontend-i18n.service';
+import { FrontendStateService, PortfolioLot, PortfolioMark, PriceBar } from './frontend-state.service';
+
+type ChartRange = '1m' | '3m' | '6m' | '1y' | 'all';
+type TradeEvent = {
+  lotId: number;
+  type: 'buy' | 'sell';
+  date: string;
+  price: number;
+  shares: number;
+};
 
 @Component({
   standalone: true,
@@ -14,6 +34,13 @@ import { FrontendStateService, PortfolioMark } from './frontend-state.service';
   styleUrl: './symbol-detail-page.css',
 })
 export class SymbolDetailPage {
+  @ViewChild('chartHost')
+  set chartHost(value: ElementRef<HTMLDivElement> | undefined) {
+    this.chartHostRef = value?.nativeElement ?? null;
+    this.syncChart();
+  }
+
+  protected readonly i18n = inject(FrontendI18nService);
   protected readonly state = inject(FrontendStateService);
   private readonly route = inject(ActivatedRoute);
   private readonly routeSymbol = toSignal(
@@ -21,7 +48,17 @@ export class SymbolDetailPage {
     { initialValue: this.route.snapshot.paramMap.get('symbol') },
   );
 
+  private chartHostRef: HTMLDivElement | null = null;
+  private chart: IChartApi | null = null;
+  private candleSeries: any = null;
+  private percentSeries: any = null;
+  private markerPlugin: any = null;
+  private resizeObserver: ResizeObserver | null = null;
+
   protected readonly lifecycle = computed(() => this.state.selectedSymbolLifecycle());
+  protected readonly priceBars = computed(() => this.state.selectedSymbolPriceBars());
+  protected readonly selectedRange = signal<ChartRange>('6m');
+
   protected readonly headlineStats = computed(() => {
     const lots = this.lifecycle()?.lots ?? [];
     const closed = lots.filter((lot) => lot.status === 'closed');
@@ -40,12 +77,60 @@ export class SymbolDetailPage {
     };
   });
 
+  protected readonly chartSummary = computed(() => {
+    const bars = this.priceBars();
+    if (!bars.length) {
+      return null;
+    }
+    const closes = bars.map((bar) => bar.close);
+    return {
+      firstTime: bars[0].time,
+      lastTime: bars[bars.length - 1].time,
+      lastClose: bars[bars.length - 1].close,
+      minPrice: Math.min(...closes),
+      maxPrice: Math.max(...closes),
+    };
+  });
+  protected readonly tradeEvents = computed<TradeEvent[]>(() => {
+    const lots = this.lifecycle()?.lots ?? [];
+    return lots
+      .flatMap((lot) => {
+        const events: TradeEvent[] = [
+          {
+            lotId: lot.id,
+            type: 'buy',
+            date: lot.entry_trade_date,
+            price: lot.entry_price_open,
+            shares: lot.shares,
+          },
+        ];
+        if (lot.exit_trade_date && lot.exit_price_open !== null) {
+          events.push({
+            lotId: lot.id,
+            type: 'sell',
+            date: lot.exit_trade_date,
+            price: lot.exit_price_open,
+            shares: lot.shares,
+          });
+        }
+        return events;
+      })
+      .sort((a, b) => a.date.localeCompare(b.date) || a.lotId - b.lotId);
+  });
+
   constructor() {
     effect(() => {
       const symbol = this.routeSymbol();
       if (symbol) {
         void this.state.loadSymbolLifecycle(symbol);
       }
+    });
+
+    effect(() => {
+      this.priceBars();
+      this.lifecycle();
+      this.selectedRange();
+      this.syncChart();
     });
   }
 
@@ -58,5 +143,193 @@ export class SymbolDetailPage {
 
   protected latestMark(marks: PortfolioMark[]): PortfolioMark | null {
     return marks.length ? marks[marks.length - 1] : null;
+  }
+
+  protected eventLabel(type: TradeEvent['type']): string {
+    return this.i18n.t(type);
+  }
+
+  protected async setInterval(interval: '1d'): Promise<void> {
+    await this.state.setPriceInterval(interval);
+  }
+
+  protected setRange(range: ChartRange): void {
+    this.selectedRange.set(range);
+    this.applyVisibleRange();
+  }
+
+  private syncChart(): void {
+    if (!this.chartHostRef) {
+      return;
+    }
+    const bars = this.priceBars();
+    if (!bars.length) {
+      this.destroyChart();
+      return;
+    }
+    if (!this.chart) {
+      this.createChart();
+    }
+    if (!this.chart || !this.candleSeries || !this.percentSeries) {
+      return;
+    }
+
+    this.candleSeries.setData(
+      bars.map((bar) => ({
+        time: bar.time as Time,
+        open: bar.open,
+        high: bar.high,
+        low: bar.low,
+        close: bar.close,
+      })),
+    );
+    this.percentSeries.setData(
+      bars.map((bar) => ({
+        time: bar.time as Time,
+        value: bar.close,
+      })),
+    );
+    this.applyMarkers(bars, this.lifecycle()?.lots ?? []);
+    this.applyVisibleRange();
+  }
+
+  private createChart(): void {
+    if (!this.chartHostRef) {
+      return;
+    }
+    this.chart = createChart(this.chartHostRef, {
+      autoSize: true,
+      height: 420,
+      layout: {
+        background: { type: ColorType.Solid, color: '#fffaf2' },
+        textColor: '#5b5447',
+      },
+      grid: {
+        vertLines: { color: 'rgba(28, 28, 28, 0.08)' },
+        horzLines: { color: 'rgba(28, 28, 28, 0.08)' },
+      },
+      rightPriceScale: {
+        visible: true,
+        borderColor: 'rgba(28, 28, 28, 0.18)',
+        mode: PriceScaleMode.Normal,
+      },
+      leftPriceScale: {
+        visible: true,
+        borderColor: 'rgba(28, 28, 28, 0.18)',
+        mode: PriceScaleMode.Percentage,
+      },
+      timeScale: {
+        borderColor: 'rgba(28, 28, 28, 0.18)',
+        timeVisible: true,
+      },
+      crosshair: {
+        vertLine: { color: 'rgba(12, 122, 90, 0.35)' },
+        horzLine: { color: 'rgba(12, 122, 90, 0.35)' },
+      },
+      localization: {
+        priceFormatter: (price: number) => price.toFixed(2),
+      },
+    });
+
+    this.candleSeries = this.chart.addSeries(CandlestickSeries, {
+      upColor: '#0c7a5a',
+      downColor: '#a63d40',
+      wickUpColor: '#0c7a5a',
+      wickDownColor: '#a63d40',
+      borderUpColor: '#0c7a5a',
+      borderDownColor: '#a63d40',
+      priceScaleId: 'right',
+    });
+
+    this.percentSeries = this.chart.addSeries(LineSeries, {
+      color: 'rgba(12, 122, 90, 0)',
+      lineWidth: 1,
+      priceScaleId: 'left',
+      lastValueVisible: false,
+      priceLineVisible: false,
+      crosshairMarkerVisible: false,
+    });
+
+    this.resizeObserver = new ResizeObserver(() => {
+      this.chart?.timeScale().fitContent();
+      this.applyVisibleRange();
+    });
+    this.resizeObserver.observe(this.chartHostRef);
+  }
+
+  private applyMarkers(bars: PriceBar[], lots: PortfolioLot[]): void {
+    if (!this.candleSeries) {
+      return;
+    }
+    const barTimes = new Set(bars.map((bar) => bar.time));
+    const markers = lots.flatMap((lot) => {
+      const items: Array<{
+        time: Time;
+        position: 'belowBar' | 'aboveBar';
+        color: string;
+        shape: 'arrowUp' | 'arrowDown';
+        text: string;
+      }> = [];
+      if (barTimes.has(lot.entry_trade_date)) {
+        items.push({
+          time: lot.entry_trade_date as Time,
+          position: 'belowBar',
+          color: '#0c7a5a',
+          shape: 'arrowUp',
+          text: `BUY ${lot.entry_trade_date} @ ${lot.entry_price_open.toFixed(2)}`,
+        });
+      }
+      if (lot.exit_trade_date && barTimes.has(lot.exit_trade_date)) {
+        items.push({
+          time: lot.exit_trade_date as Time,
+          position: 'aboveBar',
+          color: '#a63d40',
+          shape: 'arrowDown',
+          text: `SELL ${lot.exit_trade_date} @ ${lot.exit_price_open?.toFixed(2) ?? 'N/A'}`,
+        });
+      }
+      return items;
+    });
+    if (!this.markerPlugin) {
+      this.markerPlugin = createSeriesMarkers(this.candleSeries, markers);
+      return;
+    }
+    this.markerPlugin.setMarkers(markers);
+  }
+
+  private applyVisibleRange(): void {
+    if (!this.chart) {
+      return;
+    }
+    const bars = this.priceBars();
+    if (!bars.length) {
+      return;
+    }
+    if (this.selectedRange() === 'all') {
+      this.chart.timeScale().fitContent();
+      return;
+    }
+    const sizeMap: Record<Exclude<ChartRange, 'all'>, number> = {
+      '1m': 22,
+      '3m': 66,
+      '6m': 132,
+      '1y': 252,
+    };
+    const count = sizeMap[this.selectedRange() as Exclude<ChartRange, 'all'>];
+    const fromIndex = Math.max(0, bars.length - count);
+    this.chart.timeScale().setVisibleRange({
+      from: bars[fromIndex].time as Time,
+      to: bars[bars.length - 1].time as Time,
+    });
+  }
+
+  private destroyChart(): void {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
+    this.chart?.remove();
+    this.chart = null;
+    this.candleSeries = null;
+    this.percentSeries = null;
+    this.markerPlugin = null;
   }
 }

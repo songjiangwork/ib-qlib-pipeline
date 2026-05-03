@@ -5,7 +5,9 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Query
 
-from .price_store import summarize_performance
+import datetime as dt
+
+from .price_store import list_price_bars, list_price_history, summarize_performance
 from .portfolio_store import (
     get_portfolio_run,
     list_portfolio_lots,
@@ -125,6 +127,46 @@ def create_app() -> FastAPI:
             "summary": summary,
             "recommendations": recommendations,
         }
+
+    @app.get("/api/prices/{symbol}")
+    def get_price_history(
+        symbol: str,
+        start_date: str | None = Query(default=None),
+        end_date: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        parsed_start = dt.date.fromisoformat(start_date) if start_date else None
+        parsed_end = dt.date.fromisoformat(end_date) if end_date else None
+        try:
+            return list_price_history(
+                settings.project_root,
+                symbol=symbol,
+                start_date=parsed_start,
+                end_date=parsed_end,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/prices/{symbol}/bars")
+    def get_price_bars(
+        symbol: str,
+        interval: str = Query(default="1d"),
+        start_date: str | None = Query(default=None),
+        end_date: str | None = Query(default=None),
+    ) -> list[dict[str, Any]]:
+        parsed_start = dt.date.fromisoformat(start_date) if start_date else None
+        parsed_end = dt.date.fromisoformat(end_date) if end_date else None
+        try:
+            return list_price_bars(
+                settings.project_root,
+                symbol=symbol,
+                interval=interval,
+                start_date=parsed_start,
+                end_date=parsed_end,
+            )
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     @app.get("/api/portfolio-runs")
     def get_portfolio_runs() -> list[dict[str, Any]]:

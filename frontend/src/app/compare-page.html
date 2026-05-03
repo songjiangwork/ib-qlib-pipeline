@@ -1,0 +1,95 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('compareStocks') }}</p>
+      <h2>{{ i18n.t('compareStocks') }}</h2>
+      <p class="muted">{{ i18n.t('compareSubtitle') }}</p>
+    </div>
+    <div class="summary">
+      <span>{{ i18n.t('selectedSymbols') }}</span>
+      <strong>{{ state.compareSymbols().length }}</strong>
+    </div>
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('selectedSymbols') }}</h3>
+        <button type="button" class="action-button" (click)="clearAll()">
+          {{ i18n.t('clearAll') }}
+        </button>
+      </div>
+      <p class="muted">{{ i18n.t('compareHint') }}</p>
+      <div class="chip-list">
+        @for (symbol of state.symbolsInRun(); track symbol) {
+          <button
+            type="button"
+            class="chip"
+            [class.active]="state.isCompareSelected(symbol)"
+            (click)="toggleSymbol(symbol)"
+          >
+            {{ symbol }}
+          </button>
+        }
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('compareDetail') }}</h3>
+        <div class="panel-actions">
+          <span>{{ compareRows().length }}</span>
+          <button type="button" class="action-button" (click)="clearAll()">
+            {{ i18n.t('clearAll') }}
+          </button>
+        </div>
+      </div>
+      @if (compareRows().length < 2) {
+        <div class="empty">{{ i18n.t('compareEmpty') }}</div>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>{{ i18n.t('symbol') }}</th>
+                <th>{{ i18n.t('timesEntered') }}</th>
+                <th>{{ i18n.t('closedLots') }}</th>
+                <th>{{ i18n.t('openLots') }}</th>
+                <th>{{ i18n.t('avgHoldDays') }}</th>
+                <th>{{ i18n.t('winRate') }}</th>
+                <th>{{ i18n.t('avgReturnPct') }}</th>
+                <th>{{ i18n.t('realizedPnl') }}</th>
+                <th>{{ i18n.t('latestStatus') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of compareRows(); track row.symbol) {
+                <tr>
+                  <td>
+                    <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
+                      {{ row.symbol }}
+                    </button>
+                  </td>
+                  <td>{{ row.timesEntered }}</td>
+                  <td>{{ row.closedLots }}</td>
+                  <td>{{ row.openLots }}</td>
+                  <td>{{ row.avgHoldDays === null ? 'N/A' : (row.avgHoldDays | number:'1.1-1') }}</td>
+                  <td>{{ row.winRatePct === null ? 'N/A' : (row.winRatePct | number:'1.1-1') + '%' }}</td>
+                  <td [class]="pnlClass(row.avgReturnPct)">
+                    {{ row.avgReturnPct === null ? 'N/A' : (row.avgReturnPct | number:'1.2-2') + '%' }}
+                  </td>
+                  <td [class]="pnlClass(row.totalRealizedPnl)">{{ row.totalRealizedPnl | number:'1.2-2' }}</td>
+                  <td>{{ statusLabel(row.latestStatus) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+  </div>
+</section>

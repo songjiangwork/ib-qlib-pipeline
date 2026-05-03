@@ -13,10 +13,57 @@ def _load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
     price_path = Path(project_root_str) / "data" / "processed" / "qlib_csv" / f"{symbol}.csv"
     if not price_path.exists():
         raise FileNotFoundError(f"Missing price file for {symbol}: {price_path}")
-    frame = pd.read_csv(price_path, usecols=["date", "close"])
+    frame = pd.read_csv(price_path, usecols=["date", "open", "high", "low", "close", "volume"])
     frame["date"] = pd.to_datetime(frame["date"]).dt.date
     frame = frame.sort_values("date").reset_index(drop=True)
     return frame
+
+
+def list_price_history(
+    project_root: Path,
+    symbol: str,
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+) -> list[dict[str, Any]]:
+    frame = _load_price_frame(str(project_root), symbol)
+    if start_date is not None:
+        frame = frame[frame["date"] >= start_date]
+    if end_date is not None:
+        frame = frame[frame["date"] <= end_date]
+    return [
+        {
+            "date": row["date"].isoformat(),
+            "close": float(row["close"]),
+        }
+        for _, row in frame.iterrows()
+    ]
+
+
+def list_price_bars(
+    project_root: Path,
+    symbol: str,
+    interval: str = "1d",
+    start_date: dt.date | None = None,
+    end_date: dt.date | None = None,
+) -> list[dict[str, Any]]:
+    if interval != "1d":
+        raise ValueError(f"Unsupported interval: {interval}")
+    frame = _load_price_frame(str(project_root), symbol)
+    if start_date is not None:
+        frame = frame[frame["date"] >= start_date]
+    if end_date is not None:
+        frame = frame[frame["date"] <= end_date]
+    return [
+        {
+            "time": row["date"].isoformat(),
+            "open": float(row["open"]),
+            "high": float(row["high"]),
+            "low": float(row["low"]),
+            "close": float(row["close"]),
+            "volume": float(row["volume"]) if pd.notna(row["volume"]) else None,
+        }
+        for _, row in frame.iterrows()
+    ]
 
 
 def compute_forward_metrics(

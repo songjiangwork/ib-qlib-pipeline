@@ -1,6 +1,7 @@
 import { Injectable, computed, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
+import { FrontendI18nService } from './frontend-i18n.service';
 
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
@@ -121,9 +122,21 @@ export interface PortfolioSymbolLifecycle {
   lots: Array<PortfolioLot & { marks: PortfolioMark[] }>;
 }
 
+export interface PriceBar {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  volume?: number | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class FrontendStateService {
-  constructor(private readonly http: HttpClient) {}
+  constructor(
+    private readonly http: HttpClient,
+    private readonly i18n: FrontendI18nService,
+  ) {}
 
   readonly rankingDateFilter = signal('');
   readonly symbolFilter = signal('');
@@ -140,7 +153,10 @@ export class FrontendStateService {
   readonly portfolioRuns = signal<PortfolioRunSummary[]>([]);
   readonly selectedPortfolioRunId = signal<number | null>(null);
   readonly portfolioLots = signal<PortfolioLot[]>([]);
+  readonly compareSymbols = signal<string[]>([]);
   readonly selectedSymbolLifecycle = signal<PortfolioSymbolLifecycle | null>(null);
+  readonly selectedSymbolPriceBars = signal<PriceBar[]>([]);
+  readonly selectedPriceInterval = signal<'1d'>('1d');
   readonly loadError = signal<string | null>(null);
   readonly detailError = signal<string | null>(null);
   readonly isLoading = signal(false);
@@ -180,7 +196,7 @@ export class FrontendStateService {
         await this.selectPortfolioRun(portfolioRuns[0].id);
       }
     } catch {
-      this.loadError.set('Failed to load backend dashboard data. Check backend and proxy settings.');
+      this.loadError.set(this.i18n.t('failedDashboard'));
     } finally {
       this.isLoading.set(false);
     }
@@ -198,22 +214,26 @@ export class FrontendStateService {
       this.selectedRunData.set(data ?? null);
     } catch {
       this.selectedRunData.set(null);
-      this.detailError.set('Failed to load ranking details from backend.');
+      this.detailError.set(this.i18n.t('failedRankingDetails'));
     }
   }
 
   async selectPortfolioRun(portfolioRunId: number): Promise<void> {
     this.selectedPortfolioRunId.set(portfolioRunId);
     this.selectedSymbolLifecycle.set(null);
+    this.selectedSymbolPriceBars.set([]);
     this.detailError.set(null);
     try {
       const lots = await firstValueFrom(
         this.http.get<PortfolioLot[]>(`/api/portfolio-runs/${portfolioRunId}/lots`),
       );
       this.portfolioLots.set(lots ?? []);
+      const symbols = new Set((lots ?? []).map((lot) => lot.symbol));
+      this.compareSymbols.set(this.compareSymbols().filter((symbol) => symbols.has(symbol)));
     } catch {
       this.portfolioLots.set([]);
-      this.detailError.set('Failed to load portfolio lots from backend.');
+      this.compareSymbols.set([]);
+      this.detailError.set(this.i18n.t('failedPortfolioLots'));
     }
   }
 
@@ -230,9 +250,11 @@ export class FrontendStateService {
         ),
       );
       this.selectedSymbolLifecycle.set(lifecycle ?? null);
+      await this.loadSymbolPriceBars(symbol, lifecycle?.lots ?? []);
     } catch {
       this.selectedSymbolLifecycle.set(null);
-      this.detailError.set('Failed to load symbol lifecycle from backend.');
+      this.selectedSymbolPriceBars.set([]);
+      this.detailError.set(this.i18n.t('failedSymbolLifecycle'));
     }
   }
 
@@ -260,7 +282,7 @@ export class FrontendStateService {
       this.rankingDatesHasMore.set(page.has_more);
       this.rankingDatesNextOffset.set(page.next_offset);
     } catch {
-      this.loadError.set('Failed to load ranking date list.');
+      this.loadError.set(this.i18n.t('failedRankingDates'));
     } finally {
       this.rankingDatesLoading.set(false);
     }
@@ -276,6 +298,28 @@ export class FrontendStateService {
       return;
     }
     await this.loadRankingDates(false);
+  }
+
+  toggleCompareSymbol(symbol: string): void {
+    const current = this.compareSymbols();
+    if (current.includes(symbol)) {
+      this.compareSymbols.set(current.filter((item) => item !== symbol));
+      return;
+    }
+    if (current.length >= 5) {
+      this.detailError.set(this.i18n.t('maxCompareReached'));
+      return;
+    }
+    this.compareSymbols.set([...current, symbol]);
+    this.detailError.set(null);
+  }
+
+  clearCompareSymbols(): void {
+    this.compareSymbols.set([]);
+  }
+
+  isCompareSelected(symbol: string): boolean {
+    return this.compareSymbols().includes(symbol);
   }
 
   isBoughtOnSignal(symbol: string, signalDate: string | null | undefined): boolean {
@@ -297,5 +341,36 @@ export class FrontendStateService {
         lot.entry_signal_date <= signalDate &&
         (lot.exit_signal_date === null || lot.exit_signal_date > signalDate),
     );
+  }
+
+  async setPriceInterval(interval: '1d'): Promise<void> {
+    this.selectedPriceInterval.set(interval);
+    const symbol = this.selectedSymbolLifecycle()?.symbol;
+    const lots = this.selectedSymbolLifecycle()?.lots ?? [];
+    if (symbol) {
+      await this.loadSymbolPriceBars(symbol, lots);
+    }
+  }
+
+  private async loadSymbolPriceBars(
+    symbol: string,
+    lots: Array<PortfolioLot & { marks?: PortfolioMark[] }>,
+  ): Promise<void> {
+    if (!lots.length) {
+      this.selectedSymbolPriceBars.set([]);
+      return;
+    }
+    try {
+      const prices = await firstValueFrom(
+        this.http.get<PriceBar[]>(`/api/prices/${symbol}/bars`, {
+          params: {
+            interval: this.selectedPriceInterval(),
+          },
+        }),
+      );
+      this.selectedSymbolPriceBars.set(prices ?? []);
+    } catch {
+      this.selectedSymbolPriceBars.set([]);
+    }
   }
 }

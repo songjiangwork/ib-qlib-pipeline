@@ -63,7 +63,7 @@
 
 .nav-tabs {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 8px;
 }
 
@@ -133,6 +133,27 @@
 .item-card strong {
   display: block;
   margin-bottom: 4px;
+}
+
+.lang-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.lang-button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.56);
+  font: inherit;
+  cursor: pointer;
+}
+
+.lang-button.active {
+  background: var(--accent-soft);
+  border-color: rgba(12, 122, 90, 0.4);
+  color: var(--accent);
 }
 
 .stack {
