@@ -13,6 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import connect, init_db, rows_to_dicts
+from .run_store import ranking_df_to_rows
 from .settings import Settings
 
 
@@ -148,6 +149,43 @@ class RankingBackendService:
         with connect(self.settings.db_path) as conn:
             rows = conn.execute(query, tuple(params)).fetchall()
         return rows_to_dicts(rows)
+
+    def list_ranking_dates(
+        self,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+        query: str | None = None,
+    ) -> dict[str, Any]:
+        where = "WHERE r.trigger_source = 'backfill' AND r.signal_date IS NOT NULL"
+        params: list[Any] = []
+        if query:
+            where += " AND r.signal_date LIKE ?"
+            params.append(f"%{query}%")
+
+        count_query = f"""
+            SELECT COUNT(*)
+            FROM runs r
+            {where}
+        """
+        list_query = f"""
+            SELECT r.id AS run_id, r.signal_date, r.row_count
+            FROM runs r
+            {where}
+            ORDER BY r.signal_date DESC
+            LIMIT ? OFFSET ?
+        """
+        with connect(self.settings.db_path) as conn:
+            total = int(conn.execute(count_query, tuple(params)).fetchone()[0])
+            rows = conn.execute(list_query, tuple([*params, limit, offset])).fetchall()
+        items = [dict(row) for row in rows]
+        next_offset = offset + len(items)
+        return {
+            "items": items,
+            "total": total,
+            "has_more": next_offset < total,
+            "next_offset": next_offset,
+        }
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         with connect(self.settings.db_path) as conn:
@@ -299,8 +337,8 @@ class RankingBackendService:
 
             artifacts = self._parse_run_output(combined_output)
             ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
-            recommendations = self._ranking_df_to_rows(ranking_df)
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            recommendations = ranking_df_to_rows(ranking_df)
 
             with connect(self.settings.db_path) as conn:
                 conn.execute(
@@ -393,21 +431,3 @@ class RankingBackendService:
                 raise RuntimeError(f"Could not parse {key} from ranking output")
             parsed[key] = match.group(1).strip()
         return parsed
-
-    def _ranking_df_to_rows(self, ranking_df: pd.DataFrame) -> list[dict[str, Any]]:
-        if "close" not in ranking_df.columns:
-            raise RuntimeError("Ranking CSV missing close column")
-        signal_date = pd.to_datetime(ranking_df["signal_date"]).dt.date.iloc[0].isoformat()
-        rows: list[dict[str, Any]] = []
-        for record in ranking_df.to_dict(orient="records"):
-            rows.append(
-                {
-                    "rank": int(record["rank"]),
-                    "symbol": str(record["symbol"]),
-                    "score": float(record["score"]),
-                    "percentile": float(record["percentile"]) if pd.notna(record["percentile"]) else None,
-                    "entry_price": float(record["close"]) if pd.notna(record["close"]) else None,
-                    "signal_date": signal_date,
-                }
-            )
-        return rows

@@ -151,15 +151,37 @@ PYTHONPATH=/home/song/projects/ib-qlib-pipeline /home/song/projects/qlib/.venv/b
   examples/workflow_us_lgb_2020_sec_port.yaml
 ```
 
-## 10. Backend API（调度 / 历史查询 / 推荐表现）
+## 10. Ranking Backend / SQLite / UI
 
-后端会做三件事：
+这一层是在原始数据抓取和 Qlib workflow 之上，增加了一套可长期运行的服务：
 
 - 定时或手动触发 `run_daily_ranking.sh`
-- 将每次运行的推荐结果保存到 SQLite
-- 提供 API 查询任意一次运行的推荐列表，以及后续 1 / 5 / 10 / 21 个交易日和截至最新收盘的涨跌表现
+- 将 ranking 结果写入 SQLite
+- 回填历史 ranking 到 `reports/rankings/` 和数据库
+- 将 ranking 转成 lot 级别的持仓生命周期
+- 通过 Angular UI 查看某天 `TOP20` 和某只股票的完整进出场过程
 
-### 安装新增依赖
+### 10.1 主要脚本的职责
+
+`run_daily_ranking.sh`
+- 面向“当天实时运行”
+- 会更新本地数据，并生成最新 ranking
+
+`backfill_rankings.py`
+- 面向“历史回放”
+- 使用已有本地数据重建历史 ranking
+- 生成 CSV / HTML，并写入 SQLite
+- 常用 `--html-mode cached`，不依赖 IB Gateway 在线
+
+`simulate_portfolio.py`
+- 面向“持仓生命周期回放”
+- 读取 SQLite 中已有 ranking
+- 按规则生成每只股票的买入、卖出和每日 mark
+- 不依赖 IB Gateway 在线
+
+### 10.2 启动后端
+
+安装依赖：
 
 ```bash
 cd /home/song/projects/ib-qlib-pipeline
@@ -167,7 +189,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 启动后端
+直接启动：
 
 ```bash
 cd /home/song/projects/ib-qlib-pipeline
@@ -175,58 +197,27 @@ source .venv/bin/activate
 python run_backend.py
 ```
 
-或者直接后台启动：
+后台启动：
 
 ```bash
 cd /home/song/projects/ib-qlib-pipeline
-./start_backend.sh
+RANKING_API_PORT=8001 ./start_backend.sh
 ```
 
-停止后台服务：
+停止：
 
 ```bash
 cd /home/song/projects/ib-qlib-pipeline
 ./stop_backend.sh
 ```
 
-### 最小 Angular 前端骨架
+默认配置：
 
-前端工程在 `frontend/`，默认开发端口固定为 `9991`，并将 `/api` 代理到后端 `http://127.0.0.1:8001`。
-
-启动前端：
-
-```bash
-cd /home/song/projects/ib-qlib-pipeline
-./start_frontend.sh
-```
-
-停止前端：
-
-```bash
-cd /home/song/projects/ib-qlib-pipeline
-./stop_frontend.sh
-```
-
-也可以直接在前端目录运行：
-
-```bash
-cd /home/song/projects/ib-qlib-pipeline/frontend
-npm start
-```
-
-访问地址：
-
-- `http://127.0.0.1:9991`
-- `http://127.0.0.1:9991/api/...` 会自动代理到后端
-
-默认监听：
-
-- `http://127.0.0.1:8000`
-- OpenAPI 文档：`http://127.0.0.1:8000/docs`
-
-默认 SQLite 路径：
-
-- `data/app/ranking_service.db`
+- Host: `0.0.0.0`
+- Port: `8000`
+- 当前常用端口：`8001`
+- OpenAPI: `http://127.0.0.1:8001/docs`
+- SQLite: `data/app/ranking_service.db`
 
 可选环境变量：
 
@@ -236,52 +227,183 @@ npm start
 - `RANKING_API_PORT`
 - `RANKING_API_RUN_SCRIPT`
 
-### 主要 API
+### 10.3 启动前端
 
-1. 创建一个工作日定时任务（例如每天 09:35 跑一次）
+前端工程在 `frontend/`，默认监听 `9991`，并将 `/api` 代理到后端。
 
-```bash
-curl -X POST http://127.0.0.1:8000/api/schedules \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name": "weekday-open-run",
-    "hour": 9,
-    "minute": 35,
-    "day_of_week": "mon-fri",
-    "timezone": "America/Edmonton",
-    "client_id": 151,
-    "lookback_days": 7,
-    "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
-    "enabled": true
-  }'
-```
-
-2. 手动触发一次运行
+启动：
 
 ```bash
-curl -X POST http://127.0.0.1:8000/api/runs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "client_id": 151,
-    "lookback_days": 7,
-    "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"
-  }'
+cd /home/song/projects/ib-qlib-pipeline
+FRONTEND_BACKEND_PORT=8001 ./start_frontend.sh
 ```
 
-3. 查看历史运行列表
+停止：
 
 ```bash
-curl "http://127.0.0.1:8000/api/runs?limit=20"
+cd /home/song/projects/ib-qlib-pipeline
+./stop_frontend.sh
 ```
 
-4. 查看某一次运行的推荐列表和后验表现
+也可以直接运行 Angular dev server：
 
 ```bash
-curl "http://127.0.0.1:8000/api/runs/1/recommendations?horizons=1,5,10,21"
+cd /home/song/projects/ib-qlib-pipeline/frontend
+npm start
 ```
 
-返回结果里每个推荐会附带：
+访问：
 
-- `1d`, `5d`, `10d`, `21d`：按交易日向后看的收益
-- `latest`：从当时推荐价格到当前最新收盘价的收益
-- `summary`：该次推荐整体的平均收益率和胜率
+- `http://127.0.0.1:9991/rankings`
+- `http://127.0.0.1:9991/symbols/<SYMBOL>`
+
+### 10.4 SQLite schema
+
+当前没有 ORM，后端直接使用 `sqlite3 + 手写 SQL`。
+
+主要表：
+
+`schedules`
+- 定时任务配置
+
+`runs`
+- 每次 ranking 执行记录
+
+`recommendations`
+- 某次 run 的完整推荐列表
+
+`portfolio_runs`
+- 一次 portfolio 生命周期回放任务
+
+`portfolio_lots`
+- 一只股票一次完整买入到卖出的 lot
+
+`portfolio_marks`
+- 某个 lot 在每个交易日的盯市记录
+
+数据库文件：
+
+- `data/app/ranking_service.db`
+
+### 10.5 常用 API
+
+基础：
+
+- `GET /api/config`
+- `GET /api/schedules`
+- `POST /api/schedules`
+- `PATCH /api/schedules/{id}`
+- `DELETE /api/schedules/{id}`
+- `GET /api/runs`
+- `POST /api/runs`
+- `GET /api/runs/{id}`
+- `GET /api/runs/{id}/recommendations`
+
+Ranking date 列表：
+
+- `GET /api/ranking-dates?limit=20&offset=0`
+- `GET /api/ranking-dates?query=2026-01&limit=20&offset=0`
+
+Portfolio：
+
+- `GET /api/portfolio-runs`
+- `GET /api/portfolio-runs/{id}`
+- `GET /api/portfolio-runs/{id}/lots`
+- `GET /api/portfolio-runs/{id}/symbols/{symbol}`
+- `GET /api/portfolio-lots/{lot_id}/marks`
+
+示例：
+
+```bash
+curl "http://127.0.0.1:8001/api/ranking-dates?limit=20&offset=0"
+curl "http://127.0.0.1:8001/api/runs/1/recommendations?horizons=1,5,10,21"
+curl "http://127.0.0.1:8001/api/portfolio-runs/1/symbols/COIN"
+```
+
+### 10.6 历史 ranking 回填
+
+从 `2025-01-01` 开始批量生成历史 ranking，并同时写文件和数据库：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+python backfill_rankings.py --start-date 2025-01-01 --html-mode cached
+```
+
+指定结束日期：
+
+```bash
+python backfill_rankings.py --start-date 2025-01-01 --end-date 2026-05-01 --html-mode cached
+```
+
+跳过已存在的 DB 和文件：
+
+```bash
+python backfill_rankings.py \
+  --start-date 2025-02-01 \
+  --end-date 2026-05-01 \
+  --html-mode cached \
+  --skip-existing-db \
+  --skip-existing-files
+```
+
+说明：
+
+- 输出 CSV: `reports/rankings/sp500_ranking_YYYY-MM-DD.csv`
+- 输出 HTML: `reports/rankings/sp500_ranking_YYYY-MM-DD.html`
+- 同时插入 `runs` 和 `recommendations`
+- `cached` 模式不会为每个历史日期发实时 IB 请求
+
+### 10.7 Portfolio lot 生命周期回放
+
+基于历史 ranking 生成股票级别生命周期：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+python simulate_portfolio.py \
+  --start-date 2025-01-02 \
+  --end-date 2026-05-01 \
+  --name top10-hold20-2025-01-02-to-2026-05-01
+```
+
+当前规则：
+
+- 使用 `T-1` ranking
+- 在 `T` 日开盘成交
+- 新进 `TOP10` 时按 `10,000 USD` 买入整数股
+- 只要股票仍在 `TOP20` 就继续持有
+- 一旦跌出 `TOP20`，就在下一交易日开盘卖出
+- 不再平衡，不设总资金上限
+
+这套设计的重点不是组合净值，而是单只股票的生命周期：
+
+- 什么时候买入
+- 买入价格和股数
+- 什么时候卖出
+- 卖出价格
+- 已实现盈亏
+- 任意中间日期的未实现盈亏
+
+### 10.8 当前前端页面
+
+当前 Angular UI 主要是两页：
+
+`/rankings`
+- 左侧边栏：
+  - `Portfolio Runs`
+  - `Ranking Dates`
+  - `Symbols`
+- 右侧：
+  - 当前选中 signal day 的 `TOP20`
+  - 买入 / 持有状态
+  - 简单 summary
+
+`/symbols/:symbol`
+- 查看该股票在当前 `portfolio run` 下的完整生命周期
+- 包括：
+  - 所有 lots
+  - entry / exit
+  - realized pnl
+  - 每日 marks
+  - 是否仍在 `TOP20 / TOP10`

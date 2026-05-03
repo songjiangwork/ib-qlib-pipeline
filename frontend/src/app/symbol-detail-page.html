@@ -1,0 +1,132 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">By Symbol</p>
+      <h2>Symbol Detail</h2>
+      <p class="muted">Track each entry, exit, and daily mark for the selected symbol.</p>
+    </div>
+    @if (lifecycle()) {
+      <div class="summary">
+        <span>Symbol</span>
+        <strong>{{ lifecycle()!.symbol }}</strong>
+      </div>
+    }
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  @if (!lifecycle()) {
+    <div class="panel empty">Choose a symbol from the sidebar.</div>
+  } @else {
+    <div class="summary-grid">
+      <article class="summary-card">
+        <span>Lots</span>
+        <strong>{{ headlineStats().lotCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>Closed Lots</span>
+        <strong>{{ headlineStats().closedCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>Open Lots</span>
+        <strong>{{ headlineStats().openCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>Realized PnL</span>
+        <strong [class]="pnlClass(headlineStats().realizedPnl)">
+          {{ headlineStats().realizedPnl | number:'1.2-2' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>Latest Unrealized</span>
+        <strong [class]="pnlClass(headlineStats().latestUnrealized)">
+          {{ headlineStats().latestUnrealized | number:'1.2-2' }}
+        </strong>
+      </article>
+    </div>
+
+    <div class="lot-stack">
+      @for (lot of lifecycle()!.lots; track lot.id) {
+        <article class="lot-card">
+          <div class="lot-head">
+            <div>
+              <span>Entry</span>
+              <strong>{{ lot.entry_trade_date }} @ {{ lot.entry_price_open | number:'1.2-2' }}</strong>
+            </div>
+            <div>
+              <span>Exit</span>
+              <strong>
+                {{
+                  lot.exit_trade_date
+                    ? lot.exit_trade_date + ' @ ' + (lot.exit_price_open! | number:'1.2-2')
+                    : 'Still open'
+                }}
+              </strong>
+            </div>
+            <div>
+              <span>Shares</span>
+              <strong>{{ lot.shares }}</strong>
+            </div>
+            <div>
+              <span>Realized</span>
+              <strong [class]="pnlClass(lot.realized_pnl)">
+                {{ lot.realized_pnl === null ? 'Open' : (lot.realized_pnl | number:'1.2-2') }}
+              </strong>
+            </div>
+            <div>
+              <span>Latest Mark</span>
+              <strong>
+                {{
+                  latestMark(lot.marks)
+                    ? latestMark(lot.marks)!.trade_date + ' / ' + (latestMark(lot.marks)!.close_price | number:'1.2-2')
+                    : 'N/A'
+                }}
+              </strong>
+            </div>
+            <div>
+              <span>Latest Unrealized</span>
+              <strong [class]="pnlClass(latestMark(lot.marks)?.unrealized_pnl)">
+                {{
+                  latestMark(lot.marks)
+                    ? (latestMark(lot.marks)!.unrealized_pnl | number:'1.2-2')
+                    : 'N/A'
+                }}
+              </strong>
+            </div>
+          </div>
+
+          <div class="mark-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Trade Date</th>
+                  <th>Close</th>
+                  <th>Market Value</th>
+                  <th>Unrealized PnL</th>
+                  <th>Return %</th>
+                  <th>TOP20</th>
+                  <th>TOP10</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (mark of lot.marks; track mark.id) {
+                  <tr>
+                    <td>{{ mark.trade_date }}</td>
+                    <td>{{ mark.close_price | number:'1.2-2' }}</td>
+                    <td>{{ mark.market_value | number:'1.2-2' }}</td>
+                    <td [class]="pnlClass(mark.unrealized_pnl)">{{ mark.unrealized_pnl | number:'1.2-2' }}</td>
+                    <td [class]="pnlClass(mark.unrealized_return_pct)">{{ mark.unrealized_return_pct | number:'1.2-2' }}%</td>
+                    <td>{{ mark.is_in_top20 ? 'Yes' : 'No' }}</td>
+                    <td>{{ mark.is_in_top10 ? 'Yes' : 'No' }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </article>
+      }
+    </div>
+  }
+</section>

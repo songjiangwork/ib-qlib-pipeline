@@ -1,0 +1,108 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">By Day</p>
+      <h2>Daily Rankings</h2>
+      <p class="muted">
+        View the selected signal day's TOP20 list, then jump into a symbol lifecycle page.
+      </p>
+    </div>
+    <div class="summary">
+      <span>Signal</span>
+      <strong>{{ state.selectedRunData()?.run?.signal_date || 'N/A' }}</strong>
+    </div>
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>TOP20 Snapshot</h3>
+        <span>{{ top20().length }} rows</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Symbol</th>
+                  <th>Action</th>
+                  <th>Held</th>
+                  <th>Score</th>
+                  <th>Percentile</th>
+                  <th>Reference Close</th>
+              <th>1D</th>
+              <th>Latest</th>
+            </tr>
+          </thead>
+          <tbody>
+                @for (row of top20(); track row.rank) {
+                  <tr>
+                    <td>{{ row.rank }}</td>
+                    <td>
+                      <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
+                        {{ row.symbol }}
+                      </button>
+                    </td>
+                    <td>
+                      @if (state.isBoughtOnSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
+                        <span class="flag buy">Buy Next Open</span>
+                      } @else {
+                        <span class="flag hold-soft">Carry</span>
+                      }
+                    </td>
+                    <td>
+                      @if (state.isHeldAfterSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
+                        <span class="flag hold">Held</span>
+                      } @else {
+                        <span class="flag flat">Flat</span>
+                      }
+                    </td>
+                    <td>{{ row.score | number:'1.4-4' }}</td>
+                    <td>{{ row.percentile === null ? 'N/A' : (row.percentile | number:'1.2-2') + '%' }}</td>
+                    <td>{{ row.entry_price === null ? 'N/A' : (row.entry_price | number:'1.2-2') }}</td>
+                <td>{{ row.performance?.['1d'] ? (row.performance?.['1d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}</td>
+                <td>{{ row.performance?.['latest'] ? (row.performance?.['latest']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel summary-panel">
+      <div class="panel-head">
+        <h3>Run Summary</h3>
+      </div>
+      @if (state.selectedRunData()) {
+        <div class="summary-cards">
+          @for (label of ['1d', '5d', '10d', '21d', 'latest']; track label) {
+            <article>
+              <span>{{ label }}</span>
+              <strong>
+                {{
+                  state.selectedRunData()!.summary[label]?.avg_return_pct === null
+                    ? 'N/A'
+                    : (state.selectedRunData()!.summary[label]?.avg_return_pct | number:'1.2-2') + '%'
+                }}
+              </strong>
+              <small>
+                Win rate:
+                {{
+                  state.selectedRunData()!.summary[label]?.win_rate_pct === null
+                    ? 'N/A'
+                    : (state.selectedRunData()!.summary[label]?.win_rate_pct | number:'1.0-1') + '%'
+                }}
+              </small>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty">Select a ranking date from the sidebar.</div>
+      }
+    </section>
+  </div>
+</section>
