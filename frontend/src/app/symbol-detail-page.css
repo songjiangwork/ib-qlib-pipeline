@@ -47,11 +47,33 @@ th {
   min-width: 150px;
 }
 
+.head-summaries {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: flex-end;
+}
+
 .summary strong,
 .summary-card strong {
   display: block;
   margin-top: 8px;
   font-size: 1.25rem;
+}
+
+.model-badge {
+  display: inline-block;
+  margin-right: 8px;
+  border: 1px solid rgba(12, 122, 90, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
 }
 
 .summary-grid {

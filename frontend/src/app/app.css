@@ -213,6 +213,21 @@
   background: rgba(255, 255, 255, 0.56);
 }
 
+.model-badge {
+  display: inline-block;
+  margin-right: 6px;
+  border: 1px solid rgba(12, 122, 90, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  vertical-align: middle;
+}
+
 .notice {
   border-radius: 18px;
   padding: 14px 18px;

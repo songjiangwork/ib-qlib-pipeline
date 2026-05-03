@@ -14,6 +14,7 @@ from .portfolio_store import (
     list_portfolio_marks,
     list_portfolio_runs,
 )
+from .model_store import list_models
 from .schemas import ManualRunRequest, ScheduleCreate, ScheduleUpdate
 from .service import BusyError, NotFoundError, RankingBackendService
 from .settings import Settings
@@ -60,6 +61,10 @@ def create_app() -> FastAPI:
     def list_schedules() -> list[dict[str, Any]]:
         return get_service().list_schedules()
 
+    @app.get("/api/models")
+    def get_models() -> list[dict[str, Any]]:
+        return list_models(settings.db_path)
+
     @app.post("/api/schedules")
     def create_schedule(payload: ScheduleCreate) -> dict[str, Any]:
         return get_service().create_schedule(payload.model_dump())
@@ -99,8 +104,9 @@ def create_app() -> FastAPI:
         limit: int = Query(default=20, ge=1, le=100),
         offset: int = Query(default=0, ge=0),
         query: str | None = Query(default=None),
+        model_id: int | None = Query(default=None, ge=1),
     ) -> dict[str, Any]:
-        return get_service().list_ranking_dates(limit=limit, offset=offset, query=query)
+        return get_service().list_ranking_dates(limit=limit, offset=offset, query=query, model_id=model_id)
 
     @app.get("/api/runs/{run_id}")
     def get_run(run_id: int) -> dict[str, Any]:

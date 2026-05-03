@@ -27,6 +27,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", default="2025-01-01", help="Start signal date in YYYY-MM-DD format")
     parser.add_argument("--end-date", default=None, help="End signal date in YYYY-MM-DD format")
     parser.add_argument("--name", default=None, help="Optional portfolio run label")
+    parser.add_argument("--model-id", type=int, default=None, help="Only simulate rankings from the specified model id")
     parser.add_argument("--buy-top-n", type=int, default=10, help="Buy new symbols from top N each signal day")
     parser.add_argument("--hold-top-n", type=int, default=20, help="Continue holding while symbol stays within top N")
     parser.add_argument("--target-notional", type=float, default=10000.0, help="Dollar notional per new lot")
@@ -34,10 +35,16 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_signal_map(db_path: Path, start_date: str, end_date: str | None) -> dict[str, dict]:
+def load_signal_map(
+    db_path: Path,
+    start_date: str,
+    end_date: str | None,
+    model_id: int | None,
+) -> dict[str, dict]:
     end_date_sql = end_date or "9999-12-31"
     query = """
         SELECT r.id AS run_id,
+               r.model_id,
                r.signal_date,
                rec.rank,
                rec.symbol
@@ -49,6 +56,7 @@ def load_signal_map(db_path: Path, start_date: str, end_date: str | None) -> dic
             WHERE status = 'succeeded'
               AND signal_date IS NOT NULL
               AND signal_date BETWEEN ? AND ?
+              AND (? IS NULL OR model_id = ?)
             GROUP BY signal_date
         ) latest ON latest.run_id = r.id
         WHERE r.signal_date BETWEEN ? AND ?
@@ -56,10 +64,21 @@ def load_signal_map(db_path: Path, start_date: str, end_date: str | None) -> dic
     """
     signal_map: dict[str, dict] = {}
     with connect(db_path) as conn:
-        rows = conn.execute(query, (start_date, end_date_sql, start_date, end_date_sql)).fetchall()
+        rows = conn.execute(
+            query,
+            (start_date, end_date_sql, model_id, model_id, start_date, end_date_sql),
+        ).fetchall()
     for row in rows:
         signal_date = str(row["signal_date"])
-        bucket = signal_map.setdefault(signal_date, {"run_id": int(row["run_id"]), "top20": [], "rank_map": {}})
+        bucket = signal_map.setdefault(
+            signal_date,
+            {
+                "run_id": int(row["run_id"]),
+                "model_id": int(row["model_id"]) if row["model_id"] is not None else None,
+                "top20": [],
+                "rank_map": {},
+            },
+        )
         rank = int(row["rank"])
         symbol = str(row["symbol"])
         if rank <= 20:
@@ -108,14 +127,18 @@ def simulate() -> None:
 
     start_date = dt.date.fromisoformat(args.start_date)
     end_date = dt.date.fromisoformat(args.end_date) if args.end_date else None
-    signal_map = load_signal_map(settings.db_path, args.start_date, args.end_date)
+    signal_map = load_signal_map(settings.db_path, args.start_date, args.end_date, args.model_id)
     if not signal_map:
         raise SystemExit("No ranking runs found in DB for the selected signal date range")
 
     signal_days = sorted(dt.date.fromisoformat(value) for value in signal_map.keys())
     if end_date is None:
         end_date = signal_days[-1]
-    run_name = args.name or f"top{args.buy_top_n}-hold{args.hold_top_n}-{args.start_date}-to-{end_date.isoformat()}"
+    model_suffix = f"-model{args.model_id}" if args.model_id is not None else ""
+    run_name = (
+        args.name
+        or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
+    )
     portfolio_run_id = create_portfolio_run(
         db_path=settings.db_path,
         name=run_name,

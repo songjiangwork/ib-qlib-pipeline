@@ -270,11 +270,19 @@ npm start
 
 主要表：
 
+`models`
+- ranking / backfill 使用的模型参考表
+- 当前内置：
+  - `1 = LightGBM`
+  - `2 = XGBoost`
+  - `3 = CatBoost`
+
 `schedules`
 - 定时任务配置
 
 `runs`
 - 每次 ranking 执行记录
+- 现在带 `model_id` 外键，指向 `models`
 
 `recommendations`
 - 某次 run 的完整推荐列表
@@ -310,6 +318,11 @@ Ranking date 列表：
 
 - `GET /api/ranking-dates?limit=20&offset=0`
 - `GET /api/ranking-dates?query=2026-01&limit=20&offset=0`
+- `GET /api/ranking-dates?model_id=1&limit=20&offset=0`
+
+模型：
+
+- `GET /api/models`
 
 价格数据：
 
@@ -327,7 +340,9 @@ Portfolio：
 示例：
 
 ```bash
+curl "http://127.0.0.1:8001/api/models"
 curl "http://127.0.0.1:8001/api/ranking-dates?limit=20&offset=0"
+curl "http://127.0.0.1:8001/api/ranking-dates?model_id=3&limit=20&offset=0"
 curl "http://127.0.0.1:8001/api/runs/1/recommendations?horizons=1,5,10,21"
 curl "http://127.0.0.1:8001/api/portfolio-runs/1/symbols/COIN"
 curl "http://127.0.0.1:8001/api/prices/NVDA/bars?interval=1d"
@@ -362,12 +377,79 @@ python backfill_rankings.py \
 
 说明：
 
-- 输出 CSV: `reports/rankings/sp500_ranking_YYYY-MM-DD.csv`
-- 输出 HTML: `reports/rankings/sp500_ranking_YYYY-MM-DD.html`
+- 输出 CSV: `reports/rankings/sp500_ranking_<model_key>_YYYY-MM-DD.csv`
+- 输出 HTML: `reports/rankings/sp500_ranking_<model_key>_YYYY-MM-DD.html`
 - 同时插入 `runs` 和 `recommendations`
 - `cached` 模式不会为每个历史日期发实时 IB 请求
 
-### 10.7 Portfolio lot 生命周期回放
+### 10.7 多模型 backfill
+
+现在支持将不同模型的 ranking 同时写入同一个 SQLite。
+
+当前约定：
+
+- `model_id=1` -> `LightGBM`
+- `model_id=2` -> `XGBoost`
+- `model_id=3` -> `CatBoost`
+
+现有历史 `runs` 默认都归为 `LightGBM`。
+
+对应 workflow：
+
+- `examples/workflow_us_lgb_2020_port.yaml`
+- `examples/workflow_us_xgb_2020_port.yaml`
+- `examples/workflow_us_catboost_2020_port.yaml`
+
+先说明环境分工：
+
+- `ib-qlib-pipeline/.venv`
+  - 跑 `backfill_rankings.py`、`simulate_portfolio.py`、后端和前端脚本
+- `qlib/.venv`
+  - 真正执行 `qrun`
+  - 模型依赖例如 `xgboost` / `catboost` 需要安装在这里
+
+安装额外模型依赖：
+
+```bash
+source /home/song/projects/qlib/.venv/bin/activate
+pip install xgboost catboost
+```
+
+XGBoost 小范围验证：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+python backfill_rankings.py \
+  --start-date 2025-01-02 \
+  --end-date 2025-01-10 \
+  --workflow-base examples/workflow_us_xgb_2020_port.yaml \
+  --model-id 2 \
+  --html-mode cached \
+  --skip-existing-db \
+  --skip-existing-files
+```
+
+CatBoost 小范围验证：
+
+```bash
+python backfill_rankings.py \
+  --start-date 2025-01-02 \
+  --end-date 2025-01-10 \
+  --workflow-base examples/workflow_us_catboost_2020_port.yaml \
+  --model-id 3 \
+  --html-mode cached \
+  --skip-existing-db \
+  --skip-existing-files
+```
+
+全量回填时建议串行执行，不建议两个模型同时跑，原因包括：
+
+- `mlruns/` artifact 查找容易串
+- SQLite 写入会有锁竞争
+- CPU / 内存 / IO 会互相争抢
+
+### 10.8 Portfolio lot 生命周期回放
 
 基于历史 ranking 生成股票级别生命周期：
 
@@ -378,6 +460,32 @@ python simulate_portfolio.py \
   --start-date 2025-01-02 \
   --end-date 2026-05-01 \
   --name top10-hold20-2025-01-02-to-2026-05-01
+```
+
+按模型分别回放时，使用 `--model-id`：
+
+```bash
+python simulate_portfolio.py \
+  --start-date 2025-01-02 \
+  --end-date 2026-05-01 \
+  --model-id 1 \
+  --name top10-hold20-lgb-2025-01-02-to-2026-05-01
+```
+
+```bash
+python simulate_portfolio.py \
+  --start-date 2025-01-02 \
+  --end-date 2026-05-01 \
+  --model-id 2 \
+  --name top10-hold20-xgb-2025-01-02-to-2026-05-01
+```
+
+```bash
+python simulate_portfolio.py \
+  --start-date 2025-01-02 \
+  --end-date 2026-05-01 \
+  --model-id 3 \
+  --name top10-hold20-catboost-2025-01-02-to-2026-05-01
 ```
 
 当前规则：
@@ -398,7 +506,7 @@ python simulate_portfolio.py \
 - 已实现盈亏
 - 任意中间日期的未实现盈亏
 
-### 10.8 当前前端页面
+### 10.9 当前前端页面
 
 当前 Angular UI 主要是三页：
 
@@ -411,6 +519,11 @@ python simulate_portfolio.py \
   - 当前选中 signal day 的 `TOP20`
   - 买入 / 持有状态
   - 简单 summary
+  - 当前 `model` 上下文
+
+补充：
+- `Ranking Dates` 会跟随当前 `Portfolio Run` 的 `model` 自动过滤
+- 同一天多个模型的 ranking 不会再混在一起
 
 `/compare`
 - 选择当前 `portfolio run` 下的多只股票
@@ -421,6 +534,7 @@ python simulate_portfolio.py \
   - 胜率
   - 平均收益率
   - 已实现盈亏
+- 当前 `model` 上下文
 - 点击股票代码可跳转到对应股票详情页
 
 `/symbols/:symbol`
@@ -435,6 +549,7 @@ python simulate_portfolio.py \
   - realized pnl
   - 每日 marks
   - 是否仍在 `TOP20 / TOP10`
+  - 当前 `model` 上下文
 
 补充说明：
 

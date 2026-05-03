@@ -66,6 +66,11 @@
           >
             <strong>#{{ run.id }} {{ run.name }}</strong>
             <span>{{ run.start_signal_date }} -> {{ run.end_signal_date || 'open' }}</span>
+            <span>
+              {{ i18n.t('model') }}:
+              <span class="model-badge">{{ run.model_key || 'n/a' }}</span>
+              {{ run.model_name || 'N/A' }}
+            </span>
             <span>{{ run.lot_count }} lots / {{ run.open_lot_count || 0 }} open</span>
           </button>
         }
@@ -95,6 +100,11 @@
           >
             <strong>{{ run.signal_date || 'N/A' }}</strong>
             <span>#{{ run.run_id }} / {{ run.row_count || 0 }} rows</span>
+            <span>
+              {{ i18n.t('model') }}:
+              <span class="model-badge">{{ run.model_key || 'n/a' }}</span>
+              {{ run.model_name || 'N/A' }}
+            </span>
           </button>
         }
         @if (state.rankingDatesLoading()) {

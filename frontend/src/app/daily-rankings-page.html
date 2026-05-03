@@ -7,9 +7,22 @@
         {{ i18n.t('dailyRankingsSubtitle') }}
       </p>
     </div>
-    <div class="summary">
-      <span>{{ i18n.t('signal') }}</span>
-      <strong>{{ state.selectedRunData()?.run?.signal_date || 'N/A' }}</strong>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('signal') }}</span>
+        <strong>{{ state.selectedRunData()?.run?.signal_date || 'N/A' }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('model') }}</span>
+        <strong>
+          @if (state.selectedRunData()?.run?.model_name) {
+            <span class="model-badge">{{ state.selectedRunData()?.run?.model_key || 'n/a' }}</span>
+            {{ state.selectedRunData()?.run?.model_name }}
+          } @else {
+            N/A
+          }
+        </strong>
+      </div>
     </div>
   </div>
 

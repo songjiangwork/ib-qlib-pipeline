@@ -5,6 +5,7 @@ data/
 data/app/
 config.yaml
 mlruns/
+catboost_info/
 reports/
 .DS_Store
 .codex

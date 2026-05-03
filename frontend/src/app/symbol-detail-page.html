@@ -6,9 +6,26 @@
       <p class="muted">{{ i18n.t('symbolDetailSubtitle') }}</p>
     </div>
     @if (lifecycle()) {
-      <div class="summary">
-        <span>{{ i18n.t('symbol') }}</span>
-        <strong>{{ lifecycle()!.symbol }}</strong>
+      <div class="head-summaries">
+        <div class="summary">
+          <span>{{ i18n.t('symbol') }}</span>
+          <strong>{{ lifecycle()!.symbol }}</strong>
+        </div>
+        <div class="summary">
+          <span>{{ i18n.t('portfolioRun') }}</span>
+          <strong>#{{ displayPortfolioRun()?.id }} {{ displayPortfolioRun()?.name }}</strong>
+        </div>
+        <div class="summary">
+          <span>{{ i18n.t('model') }}</span>
+          <strong>
+            @if (displayPortfolioRun()?.model_name) {
+              <span class="model-badge">{{ displayPortfolioRun()?.model_key || 'n/a' }}</span>
+              {{ displayPortfolioRun()?.model_name }}
+            } @else {
+              {{ modelDisplay() }}
+            }
+          </strong>
+        </div>
       </div>
     }
   </div>
@@ -43,6 +60,24 @@
         <span>{{ i18n.t('latestUnrealized') }}</span>
         <strong [class]="pnlClass(headlineStats().latestUnrealized)">
           {{ headlineStats().latestUnrealized | number:'1.2-2' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('avgHoldDaysShort') }}</span>
+        <strong>
+          {{ headlineStats().avgHoldDays === null ? 'N/A' : (headlineStats().avgHoldDays | number:'1.1-1') }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('winRateShort') }}</span>
+        <strong>
+          {{ headlineStats().winRatePct === null ? 'N/A' : (headlineStats().winRatePct | number:'1.1-1') + '%' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('avgReturnShort') }}</span>
+        <strong [class]="pnlClass(headlineStats().avgReturnPct)">
+          {{ headlineStats().avgReturnPct === null ? 'N/A' : (headlineStats().avgReturnPct | number:'1.2-2') + '%' }}
         </strong>
       </article>
     </div>

@@ -31,6 +31,7 @@ def ranking_df_to_rows(ranking_df: pd.DataFrame) -> list[dict[str, Any]]:
 def insert_completed_run(
     *,
     db_path: Path,
+    model_id: int,
     trigger_source: str,
     client_id: int,
     lookback_days: int,
@@ -58,14 +59,15 @@ def insert_completed_run(
         cursor = conn.execute(
             """
             INSERT INTO runs (
-                schedule_id, trigger_source, status, client_id, lookback_days,
+                schedule_id, model_id, trigger_source, status, client_id, lookback_days,
                 workflow_base, command, created_at, started_at, finished_at,
                 signal_date, ranking_csv_path, html_report_path, experiment_id,
                 recorder_id, row_count, log_output, error_text
-            ) VALUES (?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+            ) VALUES (?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
             """,
             (
                 schedule_id,
+                model_id,
                 trigger_source,
                 client_id,
                 lookback_days,

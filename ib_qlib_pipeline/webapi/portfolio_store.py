@@ -183,14 +183,30 @@ def list_portfolio_runs(db_path: Path) -> list[dict[str, Any]]:
             """
             SELECT pr.*,
                    COUNT(pl.id) AS lot_count,
-                   SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count
+                   SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count,
+                   MIN(r.model_id) AS model_id,
+                   MAX(r.model_id) AS max_model_id,
+                   MIN(m.key) AS model_key,
+                   MIN(m.name) AS model_name,
+                   MIN(m.model_class) AS model_class
             FROM portfolio_runs pr
             LEFT JOIN portfolio_lots pl ON pl.portfolio_run_id = pr.id
+            LEFT JOIN runs r ON r.id = pl.entry_run_id
+            LEFT JOIN models m ON m.id = r.model_id
             GROUP BY pr.id
             ORDER BY pr.created_at DESC
             """
         ).fetchall()
-    return [dict(row) for row in rows]
+    items = []
+    for row in rows:
+        item = dict(row)
+        if item.get("model_id") != item.get("max_model_id"):
+            item["model_key"] = "mixed"
+            item["model_name"] = "Mixed"
+            item["model_class"] = None
+        item.pop("max_model_id", None)
+        items.append(item)
+    return items
 
 
 def get_portfolio_run(db_path: Path, portfolio_run_id: int) -> dict[str, Any] | None:
@@ -199,15 +215,30 @@ def get_portfolio_run(db_path: Path, portfolio_run_id: int) -> dict[str, Any] | 
             """
             SELECT pr.*,
                    COUNT(pl.id) AS lot_count,
-                   SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count
+                   SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count,
+                   MIN(r.model_id) AS model_id,
+                   MAX(r.model_id) AS max_model_id,
+                   MIN(m.key) AS model_key,
+                   MIN(m.name) AS model_name,
+                   MIN(m.model_class) AS model_class
             FROM portfolio_runs pr
             LEFT JOIN portfolio_lots pl ON pl.portfolio_run_id = pr.id
+            LEFT JOIN runs r ON r.id = pl.entry_run_id
+            LEFT JOIN models m ON m.id = r.model_id
             WHERE pr.id = ?
             GROUP BY pr.id
             """,
             (portfolio_run_id,),
         ).fetchone()
-    return dict(row) if row is not None else None
+    if row is None:
+        return None
+    item = dict(row)
+    if item.get("model_id") != item.get("max_model_id"):
+        item["model_key"] = "mixed"
+        item["model_name"] = "Mixed"
+        item["model_class"] = None
+    item.pop("max_model_id", None)
+    return item
 
 
 def list_portfolio_lots(

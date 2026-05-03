@@ -8,6 +8,18 @@ from typing import Any
 SCHEMA = """
 PRAGMA foreign_keys = ON;
 
+CREATE TABLE IF NOT EXISTS models (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    model_class TEXT NOT NULL,
+    module_path TEXT NOT NULL,
+    workflow_base TEXT,
+    details_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
@@ -29,6 +41,7 @@ CREATE TABLE IF NOT EXISTS schedules (
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
+    model_id INTEGER REFERENCES models(id) ON DELETE SET NULL,
     trigger_source TEXT NOT NULL,
     status TEXT NOT NULL,
     client_id INTEGER NOT NULL,
@@ -130,6 +143,19 @@ def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        _migrate_schema(conn)
+
+
+def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def _migrate_schema(conn: sqlite3.Connection) -> None:
+    runs_columns = _column_names(conn, "runs")
+    if "model_id" not in runs_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN model_id INTEGER REFERENCES models(id) ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_model_id ON runs(model_id, signal_date DESC)")
 
 
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:

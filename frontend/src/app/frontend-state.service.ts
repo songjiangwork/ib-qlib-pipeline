@@ -17,6 +17,10 @@ export interface RunSummary {
   id: number;
   trigger_source: string;
   status: RunStatus;
+  model_id?: number | null;
+  model_key?: string | null;
+  model_name?: string | null;
+  model_class?: string | null;
   created_at: string;
   started_at?: string | null;
   finished_at?: string | null;
@@ -29,6 +33,9 @@ export interface RankingDateItem {
   run_id: number;
   signal_date: string;
   row_count: number | null;
+  model_id?: number | null;
+  model_key?: string | null;
+  model_name?: string | null;
 }
 
 export interface RankingDatePage {
@@ -73,6 +80,10 @@ export interface PortfolioRunSummary {
   id: number;
   name: string;
   strategy: string;
+  model_id?: number | null;
+  model_key?: string | null;
+  model_name?: string | null;
+  model_class?: string | null;
   buy_top_n: number;
   hold_top_n: number;
   target_notional: number;
@@ -230,6 +241,21 @@ export class FrontendStateService {
       this.portfolioLots.set(lots ?? []);
       const symbols = new Set((lots ?? []).map((lot) => lot.symbol));
       this.compareSymbols.set(this.compareSymbols().filter((symbol) => symbols.has(symbol)));
+      await this.loadRankingDates(true);
+      const selectedModelId = this.selectedPortfolioRun()?.model_id ?? null;
+      const selectedRunModelId = this.selectedRunData()?.run?.model_id ?? null;
+      const currentRunStillVisible = this.rankingDates().some(
+        (item) => item.run_id === this.selectedRankingRunId(),
+      );
+      if (!currentRunStillVisible || (selectedModelId !== null && selectedRunModelId !== selectedModelId)) {
+        const firstRunId = this.rankingDates()[0]?.run_id ?? null;
+        if (firstRunId !== null) {
+          await this.selectRankingRun(firstRunId);
+        } else {
+          this.selectedRankingRunId.set(null);
+          this.selectedRunData.set(null);
+        }
+      }
     } catch {
       this.portfolioLots.set([]);
       this.compareSymbols.set([]);
@@ -272,6 +298,7 @@ export class FrontendStateService {
           params: {
             limit: 20,
             offset,
+            ...(this.selectedPortfolioRun()?.model_id ? { model_id: this.selectedPortfolioRun()!.model_id! } : {}),
             ...(query ? { query } : {}),
           },
         }),

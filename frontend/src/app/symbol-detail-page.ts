@@ -58,22 +58,35 @@ export class SymbolDetailPage {
   protected readonly lifecycle = computed(() => this.state.selectedSymbolLifecycle());
   protected readonly priceBars = computed(() => this.state.selectedSymbolPriceBars());
   protected readonly selectedRange = signal<ChartRange>('6m');
+  protected readonly displayPortfolioRun = computed(
+    () => this.lifecycle()?.portfolio_run ?? this.state.selectedPortfolioRun(),
+  );
 
   protected readonly headlineStats = computed(() => {
     const lots = this.lifecycle()?.lots ?? [];
     const closed = lots.filter((lot) => lot.status === 'closed');
     const open = lots.filter((lot) => lot.status === 'open');
     const realizedPnl = closed.reduce((sum, lot) => sum + (lot.realized_pnl ?? 0), 0);
-    const latestMarks = lots
+    const latestMarks = open
       .map((lot) => this.latestMark(lot.marks))
       .filter((mark): mark is PortfolioMark => mark !== null);
     const latestUnrealized = latestMarks.reduce((sum, mark) => sum + mark.unrealized_pnl, 0);
+    const holdDays = closed
+      .map((lot) => this.holdDays(lot))
+      .filter((days): days is number => days !== null);
+    const returnPcts = closed
+      .map((lot) => lot.realized_return_pct)
+      .filter((value): value is number => value !== null);
+    const winCount = returnPcts.filter((value) => value > 0).length;
     return {
       lotCount: lots.length,
       closedCount: closed.length,
       openCount: open.length,
       realizedPnl,
       latestUnrealized,
+      avgHoldDays: holdDays.length ? holdDays.reduce((sum, value) => sum + value, 0) / holdDays.length : null,
+      winRatePct: returnPcts.length ? (winCount / returnPcts.length) * 100 : null,
+      avgReturnPct: returnPcts.length ? returnPcts.reduce((sum, value) => sum + value, 0) / returnPcts.length : null,
     };
   });
 
@@ -147,6 +160,26 @@ export class SymbolDetailPage {
 
   protected eventLabel(type: TradeEvent['type']): string {
     return this.i18n.t(type);
+  }
+
+  private holdDays(lot: PortfolioLot): number | null {
+    if (!lot.exit_trade_date) {
+      return null;
+    }
+    const start = new Date(lot.entry_trade_date);
+    const end = new Date(lot.exit_trade_date);
+    return Math.round((end.getTime() - start.getTime()) / 86400000);
+  }
+
+  protected modelDisplay(): string {
+    const run = this.displayPortfolioRun();
+    if (!run) {
+      return 'N/A';
+    }
+    if (run.model_name) {
+      return `${run.model_name} (${run.model_key || 'n/a'})`;
+    }
+    return 'N/A';
   }
 
   protected async setInterval(interval: '1d'): Promise<void> {

@@ -5,9 +5,32 @@
       <h2>{{ i18n.t('compareStocks') }}</h2>
       <p class="muted">{{ i18n.t('compareSubtitle') }}</p>
     </div>
-    <div class="summary">
-      <span>{{ i18n.t('selectedSymbols') }}</span>
-      <strong>{{ state.compareSymbols().length }}</strong>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('selectedSymbols') }}</span>
+        <strong>{{ state.compareSymbols().length }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <strong>
+          {{
+            state.selectedPortfolioRun()
+              ? '#' + state.selectedPortfolioRun()!.id + ' ' + state.selectedPortfolioRun()!.name
+              : 'N/A'
+          }}
+        </strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('model') }}</span>
+        <strong>
+          @if (state.selectedPortfolioRun()?.model_name) {
+            <span class="model-badge">{{ state.selectedPortfolioRun()!.model_key || 'n/a' }}</span>
+            {{ state.selectedPortfolioRun()!.model_name }}
+          } @else {
+            N/A
+          }
+        </strong>
+      </div>
     </div>
   </div>
 
@@ -23,6 +46,15 @@
           {{ i18n.t('clearAll') }}
         </button>
       </div>
+      <p class="muted">
+        {{ i18n.t('model') }}:
+        @if (state.selectedPortfolioRun()?.model_name) {
+          <span class="model-badge">{{ state.selectedPortfolioRun()!.model_key || 'n/a' }}</span>
+          {{ state.selectedPortfolioRun()!.model_name }}
+        } @else {
+          N/A
+        }
+      </p>
       <p class="muted">{{ i18n.t('compareHint') }}</p>
       <div class="chip-list">
         @for (symbol of state.symbolsInRun(); track symbol) {

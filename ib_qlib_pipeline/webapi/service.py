@@ -13,6 +13,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import connect, init_db, rows_to_dicts
+from .model_store import ensure_default_models, resolve_or_create_model_for_workflow
 from .run_store import ranking_df_to_rows
 from .settings import Settings
 
@@ -31,6 +32,8 @@ class RankingBackendService:
         self._run_lock = threading.Lock()
         self._scheduler = BackgroundScheduler(timezone=settings.timezone)
         init_db(settings.db_path)
+        ensure_default_models(settings.db_path)
+        self._backfill_legacy_run_models()
 
     def start(self) -> None:
         self._scheduler.start()
@@ -132,9 +135,14 @@ class RankingBackendService:
         signal_date: str | None = None,
     ) -> list[dict[str, Any]]:
         query = """
-            SELECT r.*, s.name AS schedule_name
+            SELECT r.*, s.name AS schedule_name,
+                   m.key AS model_key,
+                   m.name AS model_name,
+                   m.model_class AS model_class,
+                   m.module_path AS model_module_path
             FROM runs r
             LEFT JOIN schedules s ON s.id = r.schedule_id
+            LEFT JOIN models m ON m.id = r.model_id
             WHERE 1 = 1
         """
         params: list[Any] = []
@@ -156,12 +164,16 @@ class RankingBackendService:
         limit: int = 20,
         offset: int = 0,
         query: str | None = None,
+        model_id: int | None = None,
     ) -> dict[str, Any]:
         where = "WHERE r.trigger_source = 'backfill' AND r.signal_date IS NOT NULL"
         params: list[Any] = []
         if query:
             where += " AND r.signal_date LIKE ?"
             params.append(f"%{query}%")
+        if model_id is not None:
+            where += " AND r.model_id = ?"
+            params.append(model_id)
 
         count_query = f"""
             SELECT COUNT(*)
@@ -169,8 +181,10 @@ class RankingBackendService:
             {where}
         """
         list_query = f"""
-            SELECT r.id AS run_id, r.signal_date, r.row_count
+            SELECT r.id AS run_id, r.signal_date, r.row_count,
+                   m.id AS model_id, m.key AS model_key, m.name AS model_name
             FROM runs r
+            LEFT JOIN models m ON m.id = r.model_id
             {where}
             ORDER BY r.signal_date DESC
             LIMIT ? OFFSET ?
@@ -191,9 +205,14 @@ class RankingBackendService:
         with connect(self.settings.db_path) as conn:
             row = conn.execute(
                 """
-                SELECT r.*, s.name AS schedule_name
+                SELECT r.*, s.name AS schedule_name,
+                       m.key AS model_key,
+                       m.name AS model_name,
+                       m.model_class AS model_class,
+                       m.module_path AS model_module_path
                 FROM runs r
                 LEFT JOIN schedules s ON s.id = r.schedule_id
+                LEFT JOIN models m ON m.id = r.model_id
                 WHERE r.id = ?
                 """,
                 (run_id,),
@@ -265,6 +284,11 @@ class RankingBackendService:
         if not self._run_lock.acquire(blocking=False):
             raise BusyError("A ranking run is already in progress")
         now = dt.datetime.now(dt.timezone.utc).isoformat()
+        model_id = resolve_or_create_model_for_workflow(
+            self.settings.db_path,
+            self.settings.project_root,
+            workflow_base,
+        )
         command = [
             str(self.settings.run_script_path),
             "--client-id",
@@ -279,11 +303,20 @@ class RankingBackendService:
                 cursor = conn.execute(
                     """
                     INSERT INTO runs (
-                        schedule_id, trigger_source, status, client_id, lookback_days,
+                        schedule_id, model_id, trigger_source, status, client_id, lookback_days,
                         workflow_base, command, created_at
-                    ) VALUES (?, ?, 'queued', ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
                     """,
-                    (schedule_id, trigger_source, client_id, lookback_days, workflow_base, " ".join(command), now),
+                    (
+                        schedule_id,
+                        model_id,
+                        trigger_source,
+                        client_id,
+                        lookback_days,
+                        workflow_base,
+                        " ".join(command),
+                        now,
+                    ),
                 )
                 run_id = int(cursor.lastrowid)
                 if schedule_id is not None:
@@ -305,6 +338,22 @@ class RankingBackendService:
         except Exception:
             self._run_lock.release()
             raise
+
+    def _backfill_legacy_run_models(self) -> None:
+        lgb_model_id = resolve_or_create_model_for_workflow(
+            self.settings.db_path,
+            self.settings.project_root,
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        with connect(self.settings.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET model_id = ?
+                WHERE model_id IS NULL
+                """,
+                (lgb_model_id,),
+            )
 
     def _execute_run(self, run_id: int, schedule_id: int | None, command: list[str]) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
