@@ -526,6 +526,17 @@ python simulate_portfolio.py \
 - 同一天多个模型的 ranking 不会再混在一起
 
 `/compare`
+- 顶部 `Portfolio Run Leaderboard`
+  - 直接比较不同 `model + workflow` 的 portfolio 表现
+  - 指标包括：
+    - `Lots`
+    - `Closed Lots`
+    - `Open Lots`
+    - `Avg Hold Days`
+    - `Win Rate`
+    - `Avg Return %`
+    - `Realized PnL`
+  - 可一键切换当前 portfolio run
 - 选择当前 `portfolio run` 下的多只股票
 - 比较：
   - 入选次数

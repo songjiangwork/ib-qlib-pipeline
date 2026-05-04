@@ -38,6 +38,61 @@
     <div class="notice error">{{ state.detailError() }}</div>
   }
 
+  <section class="panel">
+    <div class="panel-head">
+      <h3>{{ i18n.t('portfolioRunLeaderboard') }}</h3>
+      <span>{{ portfolioRunRows().length }}</span>
+    </div>
+    <p class="muted">{{ i18n.t('portfolioRunLeaderboardSubtitle') }}</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>{{ i18n.t('portfolioRun') }}</th>
+            <th>{{ i18n.t('model') }}</th>
+            <th>{{ i18n.t('workflow') }}</th>
+            <th>{{ i18n.t('lots') }}</th>
+            <th>{{ i18n.t('closedLots') }}</th>
+            <th>{{ i18n.t('openLots') }}</th>
+            <th>{{ i18n.t('avgHoldDays') }}</th>
+            <th>{{ i18n.t('winRate') }}</th>
+            <th>{{ i18n.t('avgReturnPct') }}</th>
+            <th>{{ i18n.t('realizedPnl') }}</th>
+            <th>{{ i18n.t('action') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (run of portfolioRunRows(); track run.id) {
+            <tr [class.selected-row]="run.isSelected">
+              <td>#{{ run.id }}</td>
+              <td>{{ run.name }}</td>
+              <td>
+                <span class="model-badge">{{ run.modelKey }}</span>
+                {{ run.modelName }}
+              </td>
+              <td>{{ run.workflowBase }}</td>
+              <td>{{ run.lotCount }}</td>
+              <td>{{ run.closedLots }}</td>
+              <td>{{ run.openLots }}</td>
+              <td>{{ run.avgHoldDays === null ? 'N/A' : (run.avgHoldDays | number:'1.1-1') }}</td>
+              <td>{{ run.winRatePct === null ? 'N/A' : (run.winRatePct | number:'1.1-1') + '%' }}</td>
+              <td [class]="pnlClass(run.avgReturnPct)">
+                {{ run.avgReturnPct === null ? 'N/A' : (run.avgReturnPct | number:'1.2-2') + '%' }}
+              </td>
+              <td [class]="pnlClass(run.totalRealizedPnl)">{{ run.totalRealizedPnl === null ? 'N/A' : (run.totalRealizedPnl | number:'1.2-2') }}</td>
+              <td>
+                <button type="button" class="action-button" (click)="selectPortfolioRun(run.id)">
+                  {{ run.isSelected ? i18n.t('selected') : i18n.t('choose') }}
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
   <div class="grid">
     <section class="panel">
       <div class="panel-head">

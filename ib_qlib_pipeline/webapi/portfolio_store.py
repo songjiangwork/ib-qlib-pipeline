@@ -184,11 +184,24 @@ def list_portfolio_runs(db_path: Path) -> list[dict[str, Any]]:
             SELECT pr.*,
                    COUNT(pl.id) AS lot_count,
                    SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count,
+                   SUM(CASE WHEN pl.status = 'closed' THEN 1 ELSE 0 END) AS closed_lot_count,
+                   AVG(
+                     CASE
+                       WHEN pl.exit_trade_date IS NOT NULL
+                       THEN julianday(pl.exit_trade_date) - julianday(pl.entry_trade_date)
+                       ELSE NULL
+                     END
+                   ) AS avg_hold_days,
+                   AVG(pl.realized_return_pct) AS avg_return_pct,
+                   SUM(CASE WHEN pl.realized_pnl IS NOT NULL THEN pl.realized_pnl ELSE 0 END) AS total_realized_pnl,
+                   SUM(CASE WHEN pl.realized_return_pct IS NOT NULL THEN 1 ELSE 0 END) AS closed_with_return_count,
+                   SUM(CASE WHEN pl.realized_return_pct > 0 THEN 1 ELSE 0 END) AS win_lot_count,
                    MIN(r.model_id) AS model_id,
                    MAX(r.model_id) AS max_model_id,
                    MIN(m.key) AS model_key,
                    MIN(m.name) AS model_name,
-                   MIN(m.model_class) AS model_class
+                   MIN(m.model_class) AS model_class,
+                   MIN(m.workflow_base) AS workflow_base
             FROM portfolio_runs pr
             LEFT JOIN portfolio_lots pl ON pl.portfolio_run_id = pr.id
             LEFT JOIN runs r ON r.id = pl.entry_run_id
@@ -200,11 +213,17 @@ def list_portfolio_runs(db_path: Path) -> list[dict[str, Any]]:
     items = []
     for row in rows:
         item = dict(row)
+        closed_with_return_count = int(item.get("closed_with_return_count") or 0)
+        win_lot_count = int(item.get("win_lot_count") or 0)
+        item["win_rate_pct"] = (win_lot_count / closed_with_return_count * 100.0) if closed_with_return_count else None
         if item.get("model_id") != item.get("max_model_id"):
             item["model_key"] = "mixed"
             item["model_name"] = "Mixed"
             item["model_class"] = None
+            item["workflow_base"] = None
         item.pop("max_model_id", None)
+        item.pop("closed_with_return_count", None)
+        item.pop("win_lot_count", None)
         items.append(item)
     return items
 
@@ -216,11 +235,24 @@ def get_portfolio_run(db_path: Path, portfolio_run_id: int) -> dict[str, Any] | 
             SELECT pr.*,
                    COUNT(pl.id) AS lot_count,
                    SUM(CASE WHEN pl.status = 'open' THEN 1 ELSE 0 END) AS open_lot_count,
+                   SUM(CASE WHEN pl.status = 'closed' THEN 1 ELSE 0 END) AS closed_lot_count,
+                   AVG(
+                     CASE
+                       WHEN pl.exit_trade_date IS NOT NULL
+                       THEN julianday(pl.exit_trade_date) - julianday(pl.entry_trade_date)
+                       ELSE NULL
+                     END
+                   ) AS avg_hold_days,
+                   AVG(pl.realized_return_pct) AS avg_return_pct,
+                   SUM(CASE WHEN pl.realized_pnl IS NOT NULL THEN pl.realized_pnl ELSE 0 END) AS total_realized_pnl,
+                   SUM(CASE WHEN pl.realized_return_pct IS NOT NULL THEN 1 ELSE 0 END) AS closed_with_return_count,
+                   SUM(CASE WHEN pl.realized_return_pct > 0 THEN 1 ELSE 0 END) AS win_lot_count,
                    MIN(r.model_id) AS model_id,
                    MAX(r.model_id) AS max_model_id,
                    MIN(m.key) AS model_key,
                    MIN(m.name) AS model_name,
-                   MIN(m.model_class) AS model_class
+                   MIN(m.model_class) AS model_class,
+                   MIN(m.workflow_base) AS workflow_base
             FROM portfolio_runs pr
             LEFT JOIN portfolio_lots pl ON pl.portfolio_run_id = pr.id
             LEFT JOIN runs r ON r.id = pl.entry_run_id
@@ -233,11 +265,17 @@ def get_portfolio_run(db_path: Path, portfolio_run_id: int) -> dict[str, Any] | 
     if row is None:
         return None
     item = dict(row)
+    closed_with_return_count = int(item.get("closed_with_return_count") or 0)
+    win_lot_count = int(item.get("win_lot_count") or 0)
+    item["win_rate_pct"] = (win_lot_count / closed_with_return_count * 100.0) if closed_with_return_count else None
     if item.get("model_id") != item.get("max_model_id"):
         item["model_key"] = "mixed"
         item["model_name"] = "Mixed"
         item["model_class"] = None
+        item["workflow_base"] = None
     item.pop("max_model_id", None)
+    item.pop("closed_with_return_count", None)
+    item.pop("win_lot_count", None)
     return item
 
 

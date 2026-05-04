@@ -84,6 +84,7 @@ export interface PortfolioRunSummary {
   model_key?: string | null;
   model_name?: string | null;
   model_class?: string | null;
+  workflow_base?: string | null;
   buy_top_n: number;
   hold_top_n: number;
   target_notional: number;
@@ -92,6 +93,11 @@ export interface PortfolioRunSummary {
   created_at: string;
   lot_count: number;
   open_lot_count: number | null;
+  closed_lot_count?: number | null;
+  avg_hold_days?: number | null;
+  avg_return_pct?: number | null;
+  total_realized_pnl?: number | null;
+  win_rate_pct?: number | null;
 }
 
 export interface PortfolioLot {

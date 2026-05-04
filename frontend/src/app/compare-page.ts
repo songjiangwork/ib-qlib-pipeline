@@ -17,6 +17,22 @@ interface CompareRow {
   latestStatus: 'open' | 'closed' | 'mixed';
 }
 
+interface PortfolioRunRow {
+  id: number;
+  name: string;
+  modelKey: string;
+  modelName: string;
+  workflowBase: string;
+  lotCount: number;
+  closedLots: number;
+  openLots: number;
+  avgHoldDays: number | null;
+  winRatePct: number | null;
+  avgReturnPct: number | null;
+  totalRealizedPnl: number | null;
+  isSelected: boolean;
+}
+
 @Component({
   standalone: true,
   selector: 'app-compare-page',
@@ -35,6 +51,33 @@ export class ComparePage {
       .filter((row): row is CompareRow => row !== null);
   });
 
+  protected readonly portfolioRunRows = computed(() => {
+    return [...this.state.portfolioRuns()]
+      .map((run) => ({
+        id: run.id,
+        name: run.name,
+        modelKey: run.model_key || 'n/a',
+        modelName: run.model_name || 'N/A',
+        workflowBase: this.workflowLabel(run.workflow_base),
+        lotCount: run.lot_count,
+        closedLots: run.closed_lot_count ?? 0,
+        openLots: run.open_lot_count ?? 0,
+        avgHoldDays: run.avg_hold_days ?? null,
+        winRatePct: run.win_rate_pct ?? null,
+        avgReturnPct: run.avg_return_pct ?? null,
+        totalRealizedPnl: run.total_realized_pnl ?? null,
+        isSelected: this.state.selectedPortfolioRunId() === run.id,
+      }))
+      .sort((a, b) => {
+        const pnlA = a.totalRealizedPnl ?? Number.NEGATIVE_INFINITY;
+        const pnlB = b.totalRealizedPnl ?? Number.NEGATIVE_INFINITY;
+        if (pnlB !== pnlA) {
+          return pnlB - pnlA;
+        }
+        return b.id - a.id;
+      });
+  });
+
   protected toggleSymbol(symbol: string): void {
     this.state.toggleCompareSymbol(symbol);
   }
@@ -46,6 +89,10 @@ export class ComparePage {
   protected async openSymbol(symbol: string): Promise<void> {
     await this.state.loadSymbolLifecycle(symbol);
     await this.router.navigate(['/symbols', symbol]);
+  }
+
+  protected async selectPortfolioRun(portfolioRunId: number): Promise<void> {
+    await this.state.selectPortfolioRun(portfolioRunId);
   }
 
   protected pnlClass(value: number | null | undefined): string {
@@ -105,5 +152,13 @@ export class ComparePage {
       return null;
     }
     return actual.reduce((sum, value) => sum + value, 0) / actual.length;
+  }
+
+  private workflowLabel(value: string | null | undefined): string {
+    if (!value) {
+      return 'N/A';
+    }
+    const parts = value.split('/');
+    return parts[parts.length - 1] || value;
   }
 }

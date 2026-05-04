@@ -84,6 +84,10 @@ th {
   gap: 20px;
 }
 
+.selected-row {
+  background: rgba(12, 122, 90, 0.08);
+}
+
 .panel {
   padding: 18px;
 }
