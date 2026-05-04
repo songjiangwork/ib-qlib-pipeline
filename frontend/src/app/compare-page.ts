@@ -1,5 +1,5 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { Component, computed, inject } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 
 import { FrontendI18nService } from './frontend-i18n.service';
@@ -44,11 +44,16 @@ export class ComparePage {
   protected readonly state = inject(FrontendStateService);
   protected readonly i18n = inject(FrontendI18nService);
   private readonly router = inject(Router);
+  private readonly runSortKey = signal<keyof PortfolioRunRow>('totalRealizedPnl');
+  private readonly runSortDirection = signal<'asc' | 'desc'>('desc');
+  private readonly symbolSortKey = signal<keyof CompareRow>('totalRealizedPnl');
+  private readonly symbolSortDirection = signal<'asc' | 'desc'>('desc');
 
   protected readonly compareRows = computed(() => {
     return this.state.compareSymbols()
       .map((symbol) => this.buildRow(symbol))
-      .filter((row): row is CompareRow => row !== null);
+      .filter((row): row is CompareRow => row !== null)
+      .sort((a, b) => this.compareByKey(a, b, this.symbolSortKey(), this.symbolSortDirection()));
   });
 
   protected readonly portfolioRunRows = computed(() => {
@@ -68,14 +73,7 @@ export class ComparePage {
         totalRealizedPnl: run.total_realized_pnl ?? null,
         isSelected: this.state.selectedPortfolioRunId() === run.id,
       }))
-      .sort((a, b) => {
-        const pnlA = a.totalRealizedPnl ?? Number.NEGATIVE_INFINITY;
-        const pnlB = b.totalRealizedPnl ?? Number.NEGATIVE_INFINITY;
-        if (pnlB !== pnlA) {
-          return pnlB - pnlA;
-        }
-        return b.id - a.id;
-      });
+      .sort((a, b) => this.compareByKey(a, b, this.runSortKey(), this.runSortDirection()));
   });
 
   protected toggleSymbol(symbol: string): void {
@@ -93,6 +91,32 @@ export class ComparePage {
 
   protected async selectPortfolioRun(portfolioRunId: number): Promise<void> {
     await this.state.selectPortfolioRun(portfolioRunId);
+  }
+
+  protected toggleRunSort(key: keyof PortfolioRunRow): void {
+    if (this.runSortKey() === key) {
+      this.runSortDirection.set(this.runSortDirection() === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    this.runSortKey.set(key);
+    this.runSortDirection.set(key === 'name' || key === 'modelName' || key === 'workflowBase' ? 'asc' : 'desc');
+  }
+
+  protected toggleSymbolSort(key: keyof CompareRow): void {
+    if (this.symbolSortKey() === key) {
+      this.symbolSortDirection.set(this.symbolSortDirection() === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    this.symbolSortKey.set(key);
+    this.symbolSortDirection.set(key === 'symbol' || key === 'latestStatus' ? 'asc' : 'desc');
+  }
+
+  protected runSortMarker(key: keyof PortfolioRunRow): string {
+    return this.sortMarker(this.runSortKey(), this.runSortDirection(), key);
+  }
+
+  protected symbolSortMarker(key: keyof CompareRow): string {
+    return this.sortMarker(this.symbolSortKey(), this.symbolSortDirection(), key);
   }
 
   protected pnlClass(value: number | null | undefined): string {
@@ -160,5 +184,41 @@ export class ComparePage {
     }
     const parts = value.split('/');
     return parts[parts.length - 1] || value;
+  }
+
+  private sortMarker(currentKey: string, currentDirection: 'asc' | 'desc', key: string): string {
+    if (currentKey !== key) {
+      return '';
+    }
+    return currentDirection === 'asc' ? ' ▲' : ' ▼';
+  }
+
+  private compareByKey<T extends Record<string, any>>(
+    a: T,
+    b: T,
+    key: keyof T,
+    direction: 'asc' | 'desc',
+  ): number {
+    const dir = direction === 'asc' ? 1 : -1;
+    return this.compareValues(a[key], b[key]) * dir;
+  }
+
+  private compareValues(a: string | number | boolean | null | undefined, b: string | number | boolean | null | undefined): number {
+    if (a == null && b == null) {
+      return 0;
+    }
+    if (a == null) {
+      return 1;
+    }
+    if (b == null) {
+      return -1;
+    }
+    if (typeof a === 'string' && typeof b === 'string') {
+      return a.localeCompare(b);
+    }
+    if (typeof a === 'boolean' && typeof b === 'boolean') {
+      return Number(a) - Number(b);
+    }
+    return Number(a) - Number(b);
   }
 }

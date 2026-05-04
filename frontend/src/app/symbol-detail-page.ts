@@ -20,10 +20,11 @@ import { FrontendStateService, PortfolioLot, PortfolioMark, PriceBar } from './f
 type ChartRange = '1m' | '3m' | '6m' | '1y' | 'all';
 type TradeEvent = {
   lotId: number;
-  type: 'buy' | 'sell';
-  date: string;
-  price: number;
-  shares: number;
+  buyDate: string;
+  sellDate: string | null;
+  buyPrice: number;
+  sellPrice: number | null;
+  pnlPct: number | null;
 };
 
 @Component({
@@ -54,6 +55,10 @@ export class SymbolDetailPage {
   private percentSeries: any = null;
   private markerPlugin: any = null;
   private resizeObserver: ResizeObserver | null = null;
+  private readonly eventSortKey = signal<'lotId' | 'buyDate' | 'sellDate' | 'buyPrice' | 'sellPrice' | 'pnlPct'>('buyDate');
+  private readonly eventSortDirection = signal<'asc' | 'desc'>('asc');
+  private readonly markSortKey = signal<'trade_date' | 'close_price' | 'market_value' | 'unrealized_pnl' | 'unrealized_return_pct' | 'is_in_top20' | 'is_in_top10'>('trade_date');
+  private readonly markSortDirection = signal<'asc' | 'desc'>('asc');
 
   protected readonly lifecycle = computed(() => this.state.selectedSymbolLifecycle());
   protected readonly priceBars = computed(() => this.state.selectedSymbolPriceBars());
@@ -107,28 +112,15 @@ export class SymbolDetailPage {
   protected readonly tradeEvents = computed<TradeEvent[]>(() => {
     const lots = this.lifecycle()?.lots ?? [];
     return lots
-      .flatMap((lot) => {
-        const events: TradeEvent[] = [
-          {
-            lotId: lot.id,
-            type: 'buy',
-            date: lot.entry_trade_date,
-            price: lot.entry_price_open,
-            shares: lot.shares,
-          },
-        ];
-        if (lot.exit_trade_date && lot.exit_price_open !== null) {
-          events.push({
-            lotId: lot.id,
-            type: 'sell',
-            date: lot.exit_trade_date,
-            price: lot.exit_price_open,
-            shares: lot.shares,
-          });
-        }
-        return events;
-      })
-      .sort((a, b) => a.date.localeCompare(b.date) || a.lotId - b.lotId);
+      .map((lot) => ({
+        lotId: lot.id,
+        buyDate: lot.entry_trade_date,
+        sellDate: lot.exit_trade_date,
+        buyPrice: lot.entry_price_open,
+        sellPrice: lot.exit_price_open,
+        pnlPct: lot.realized_return_pct,
+      }))
+      .sort((a, b) => this.compareEvents(a, b));
   });
 
   constructor() {
@@ -158,8 +150,38 @@ export class SymbolDetailPage {
     return marks.length ? marks[marks.length - 1] : null;
   }
 
-  protected eventLabel(type: TradeEvent['type']): string {
-    return this.i18n.t(type);
+  protected toggleEventSort(key: 'lotId' | 'buyDate' | 'sellDate' | 'buyPrice' | 'sellPrice' | 'pnlPct'): void {
+    if (this.eventSortKey() === key) {
+      this.eventSortDirection.set(this.eventSortDirection() === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    this.eventSortKey.set(key);
+    this.eventSortDirection.set(key === 'buyDate' || key === 'sellDate' ? 'asc' : 'desc');
+  }
+
+  protected toggleMarkSort(
+    key: 'trade_date' | 'close_price' | 'market_value' | 'unrealized_pnl' | 'unrealized_return_pct' | 'is_in_top20' | 'is_in_top10',
+  ): void {
+    if (this.markSortKey() === key) {
+      this.markSortDirection.set(this.markSortDirection() === 'asc' ? 'desc' : 'asc');
+      return;
+    }
+    this.markSortKey.set(key);
+    this.markSortDirection.set(key === 'trade_date' ? 'asc' : 'desc');
+  }
+
+  protected eventSortMarker(key: 'lotId' | 'buyDate' | 'sellDate' | 'buyPrice' | 'sellPrice' | 'pnlPct'): string {
+    return this.sortMarker(this.eventSortKey(), this.eventSortDirection(), key);
+  }
+
+  protected markSortMarker(
+    key: 'trade_date' | 'close_price' | 'market_value' | 'unrealized_pnl' | 'unrealized_return_pct' | 'is_in_top20' | 'is_in_top10',
+  ): string {
+    return this.sortMarker(this.markSortKey(), this.markSortDirection(), key);
+  }
+
+  protected sortedMarks(marks: PortfolioMark[]): PortfolioMark[] {
+    return [...marks].sort((a, b) => this.compareMarks(a, b));
   }
 
   private holdDays(lot: PortfolioLot): number | null {
@@ -364,5 +386,43 @@ export class SymbolDetailPage {
     this.candleSeries = null;
     this.percentSeries = null;
     this.markerPlugin = null;
+  }
+
+  private compareEvents(a: TradeEvent, b: TradeEvent): number {
+    const key = this.eventSortKey();
+    const dir = this.eventSortDirection() === 'asc' ? 1 : -1;
+    return this.compareValues(a[key], b[key]) * dir;
+  }
+
+  private compareMarks(a: PortfolioMark, b: PortfolioMark): number {
+    const key = this.markSortKey();
+    const dir = this.markSortDirection() === 'asc' ? 1 : -1;
+    return this.compareValues((a as any)[key], (b as any)[key]) * dir;
+  }
+
+  private sortMarker(currentKey: string, currentDirection: 'asc' | 'desc', key: string): string {
+    if (currentKey !== key) {
+      return '';
+    }
+    return currentDirection === 'asc' ? ' ▲' : ' ▼';
+  }
+
+  private compareValues(a: string | number | boolean | null | undefined, b: string | number | boolean | null | undefined): number {
+    if (a == null && b == null) {
+      return 0;
+    }
+    if (a == null) {
+      return 1;
+    }
+    if (b == null) {
+      return -1;
+    }
+    if (typeof a === 'string' && typeof b === 'string') {
+      return a.localeCompare(b);
+    }
+    if (typeof a === 'boolean' && typeof b === 'boolean') {
+      return Number(a) - Number(b);
+    }
+    return Number(a) - Number(b);
   }
 }

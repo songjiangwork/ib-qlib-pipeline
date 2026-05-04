@@ -39,16 +39,16 @@
       <div class="table-wrap">
         <table>
           <thead>
-                <tr>
-                  <th>Rank</th>
-                  <th>{{ i18n.t('symbol') }}</th>
+            <tr>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('rank')">Rank{{ sortMarker('rank') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('symbol')">{{ i18n.t('symbol') }}{{ sortMarker('symbol') }}</button></th>
                   <th>{{ i18n.t('action') }}</th>
                   <th>{{ i18n.t('held') }}</th>
-                  <th>{{ i18n.t('score') }}</th>
-                  <th>{{ i18n.t('percentile') }}</th>
-                  <th>{{ i18n.t('referenceClose') }}</th>
-              <th>1D</th>
-              <th>Latest</th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('score')">{{ i18n.t('score') }}{{ sortMarker('score') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('percentile')">{{ i18n.t('percentile') }}{{ sortMarker('percentile') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('entry_price')">{{ i18n.t('referenceClose') }}{{ sortMarker('entry_price') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleSort('oneDay')">1D{{ sortMarker('oneDay') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleSort('latest')">Latest{{ sortMarker('latest') }}</button></th>
             </tr>
           </thead>
           <tbody>

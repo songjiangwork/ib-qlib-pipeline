@@ -144,28 +144,29 @@
 
     <section class="panel">
       <div class="panel-head">
-        <h3>{{ i18n.t('tradeEvents') }}</h3>
-        <span>{{ tradeEvents().length }}</span>
+        <h3>{{ i18n.t('tradeEvents') }} <span class="inline-count">{{ tradeEvents().length }}</span></h3>
       </div>
       <div class="mark-table">
         <table>
           <thead>
             <tr>
-              <th>{{ i18n.t('tradeDate') }}</th>
-              <th>{{ i18n.t('eventType') }}</th>
-              <th>{{ i18n.t('lotId') }}</th>
-              <th>{{ i18n.t('shares') }}</th>
-              <th>{{ i18n.t('price') }}</th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('lotId')">{{ i18n.t('lotId') }}{{ eventSortMarker('lotId') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('buyDate')">{{ i18n.t('buyDate') }}{{ eventSortMarker('buyDate') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('sellDate')">{{ i18n.t('sellDate') }}{{ eventSortMarker('sellDate') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('buyPrice')">{{ i18n.t('buyPrice') }}{{ eventSortMarker('buyPrice') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('sellPrice')">{{ i18n.t('sellPrice') }}{{ eventSortMarker('sellPrice') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('pnlPct')">{{ i18n.t('pnlPct') }}{{ eventSortMarker('pnlPct') }}</button></th>
             </tr>
           </thead>
           <tbody>
-            @for (event of tradeEvents(); track event.lotId + '-' + event.type + '-' + event.date) {
+            @for (event of tradeEvents(); track event.lotId) {
               <tr>
-                <td>{{ event.date }}</td>
-                <td [class]="event.type === 'buy' ? 'up' : 'down'">{{ eventLabel(event.type) }}</td>
                 <td>#{{ event.lotId }}</td>
-                <td>{{ event.shares }}</td>
-                <td>{{ event.price | number:'1.2-2' }}</td>
+                <td>{{ event.buyDate }}</td>
+                <td>{{ event.sellDate || 'N/A' }}</td>
+                <td>{{ event.buyPrice | number:'1.2-2' }}</td>
+                <td>{{ event.sellPrice === null ? 'N/A' : (event.sellPrice | number:'1.2-2') }}</td>
+                <td [class]="pnlClass(event.pnlPct)">{{ event.pnlPct === null ? 'N/A' : (event.pnlPct | number:'1.2-2') + '%' }}</td>
               </tr>
             }
           </tbody>
@@ -227,17 +228,17 @@
             <table>
               <thead>
                 <tr>
-                  <th>{{ i18n.t('tradeDate') }}</th>
-                  <th>{{ i18n.t('close') }}</th>
-                  <th>{{ i18n.t('marketValue') }}</th>
-                  <th>{{ i18n.t('unrealizedPnl') }}</th>
-                  <th>{{ i18n.t('returnPct') }}</th>
-                  <th>{{ i18n.t('top20') }}</th>
-                  <th>{{ i18n.t('top10') }}</th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('trade_date')">{{ i18n.t('tradeDate') }}{{ markSortMarker('trade_date') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('close_price')">{{ i18n.t('close') }}{{ markSortMarker('close_price') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('market_value')">{{ i18n.t('marketValue') }}{{ markSortMarker('market_value') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('unrealized_pnl')">{{ i18n.t('unrealizedPnl') }}{{ markSortMarker('unrealized_pnl') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('unrealized_return_pct')">{{ i18n.t('returnPct') }}{{ markSortMarker('unrealized_return_pct') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('is_in_top20')">{{ i18n.t('top20') }}{{ markSortMarker('is_in_top20') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('is_in_top10')">{{ i18n.t('top10') }}{{ markSortMarker('is_in_top10') }}</button></th>
                 </tr>
               </thead>
               <tbody>
-                @for (mark of lot.marks; track mark.id) {
+                @for (mark of sortedMarks(lot.marks); track mark.id) {
                   <tr>
                     <td>{{ mark.trade_date }}</td>
                     <td>{{ mark.close_price | number:'1.2-2' }}</td>

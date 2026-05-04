@@ -48,17 +48,17 @@
       <table>
         <thead>
           <tr>
-            <th>ID</th>
-            <th>{{ i18n.t('portfolioRun') }}</th>
-            <th>{{ i18n.t('model') }}</th>
-            <th>{{ i18n.t('workflow') }}</th>
-            <th>{{ i18n.t('lots') }}</th>
-            <th>{{ i18n.t('closedLots') }}</th>
-            <th>{{ i18n.t('openLots') }}</th>
-            <th>{{ i18n.t('avgHoldDays') }}</th>
-            <th>{{ i18n.t('winRate') }}</th>
-            <th>{{ i18n.t('avgReturnPct') }}</th>
-            <th>{{ i18n.t('realizedPnl') }}</th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('id')">ID{{ runSortMarker('id') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('name')">{{ i18n.t('portfolioRun') }}{{ runSortMarker('name') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('modelName')">{{ i18n.t('model') }}{{ runSortMarker('modelName') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('workflowBase')">{{ i18n.t('workflow') }}{{ runSortMarker('workflowBase') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('lotCount')">{{ i18n.t('lots') }}{{ runSortMarker('lotCount') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('closedLots')">{{ i18n.t('closedLots') }}{{ runSortMarker('closedLots') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('openLots')">{{ i18n.t('openLots') }}{{ runSortMarker('openLots') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgHoldDays')">{{ i18n.t('avgHoldDays') }}{{ runSortMarker('avgHoldDays') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('winRatePct')">{{ i18n.t('winRate') }}{{ runSortMarker('winRatePct') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgReturnPct')">{{ i18n.t('avgReturnPct') }}{{ runSortMarker('avgReturnPct') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('totalRealizedPnl')">{{ i18n.t('realizedPnl') }}{{ runSortMarker('totalRealizedPnl') }}</button></th>
             <th>{{ i18n.t('action') }}</th>
           </tr>
         </thead>
@@ -142,15 +142,15 @@
           <table>
             <thead>
               <tr>
-                <th>{{ i18n.t('symbol') }}</th>
-                <th>{{ i18n.t('timesEntered') }}</th>
-                <th>{{ i18n.t('closedLots') }}</th>
-                <th>{{ i18n.t('openLots') }}</th>
-                <th>{{ i18n.t('avgHoldDays') }}</th>
-                <th>{{ i18n.t('winRate') }}</th>
-                <th>{{ i18n.t('avgReturnPct') }}</th>
-                <th>{{ i18n.t('realizedPnl') }}</th>
-                <th>{{ i18n.t('latestStatus') }}</th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('symbol')">{{ i18n.t('symbol') }}{{ symbolSortMarker('symbol') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('timesEntered')">{{ i18n.t('timesEntered') }}{{ symbolSortMarker('timesEntered') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('closedLots')">{{ i18n.t('closedLots') }}{{ symbolSortMarker('closedLots') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('openLots')">{{ i18n.t('openLots') }}{{ symbolSortMarker('openLots') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('avgHoldDays')">{{ i18n.t('avgHoldDays') }}{{ symbolSortMarker('avgHoldDays') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('winRatePct')">{{ i18n.t('winRate') }}{{ symbolSortMarker('winRatePct') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('avgReturnPct')">{{ i18n.t('avgReturnPct') }}{{ symbolSortMarker('avgReturnPct') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('totalRealizedPnl')">{{ i18n.t('realizedPnl') }}{{ symbolSortMarker('totalRealizedPnl') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('latestStatus')">{{ i18n.t('latestStatus') }}{{ symbolSortMarker('latestStatus') }}</button></th>
               </tr>
             </thead>
             <tbody>

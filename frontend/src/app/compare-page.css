@@ -123,6 +123,17 @@ th {
   color: var(--accent);
 }
 
+.sort-button {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+
 .table-wrap {
   overflow: auto;
   border: 1px solid var(--line);
