@@ -3,13 +3,26 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
-import os
 import sys
 from pathlib import Path
 
 import pandas as pd
 import yaml
 
+from ib_qlib_pipeline.qlib_runtime import load_qlib_runtime_config
+from ib_qlib_pipeline.ranking import TOP_N
+from ib_qlib_pipeline.ranking.ranking_loader import (
+    load_ranking_dataframe,
+    read_available_trading_days,
+)
+from ib_qlib_pipeline.reporting.company_enricher import (
+    cached_topn_details,
+    fetch_topn_company_data,
+)
+from ib_qlib_pipeline.reporting.html_report import build_html_report
+from ib_qlib_pipeline.runner.common import log
+from ib_qlib_pipeline.runner.qlib_runner import run_qlib_workflow
+from ib_qlib_pipeline.runner.runtime_workflow import build_backfill_runtime_workflow, load_base_workflow
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.model_store import (
     ensure_default_models,
@@ -18,18 +31,6 @@ from ib_qlib_pipeline.webapi.model_store import (
 )
 from ib_qlib_pipeline.webapi.run_store import insert_completed_run
 from ib_qlib_pipeline.webapi.settings import Settings
-from oneclick_daily_ranking import (
-    TOP_N,
-    _build_price_stats,
-    _load_company_meta_cache,
-    build_html_report,
-    fetch_topn_company_data,
-    find_latest_pred,
-    load_ranking_dataframe,
-    log,
-    read_available_trading_days,
-    run_cmd,
-)
 
 
 def parse_args() -> argparse.Namespace:
@@ -73,21 +74,6 @@ def existing_signal_dates(db_path: Path, model_id: int) -> set[str]:
         conn.close()
 
 
-def find_latest_pred_after(project_root: Path, min_mtime: float) -> tuple[Path, str, str]:
-    preds = []
-    for path in (project_root / "mlruns").glob("*/*/artifacts/pred.pkl"):
-        mtime = path.stat().st_mtime
-        if mtime >= min_mtime:
-            preds.append((mtime, path))
-    if not preds:
-        return find_latest_pred(project_root)
-    _, pred_path = max(preds, key=lambda item: item[0])
-    parts = pred_path.parts
-    exp_id = parts[-4]
-    rec_id = parts[-3]
-    return pred_path, exp_id, rec_id
-
-
 def backfill_csv_path(project_root: Path, model_key: str, signal_date: dt.date) -> Path:
     out_dir = project_root / "reports" / "rankings"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -100,46 +86,16 @@ def backfill_html_path(project_root: Path, model_key: str, signal_date: dt.date)
     return out_dir / f"sp500_ranking_{model_key}_{signal_date.isoformat()}.html"
 
 
-def cached_topn_details(project_root: Path, ranking_df: pd.DataFrame, client_id: int, console_lines: list[str]) -> list[dict]:
-    rows: list[dict] = []
-    log(f"[info] building cached html data for top{TOP_N} without live IB calls", console_lines)
-    for row in ranking_df.head(TOP_N).itertuples(index=False):
-        symbol = str(row.symbol)
-        cached = _load_company_meta_cache(project_root, symbol)
-        rows.append(
-            {
-                "rank": int(row.rank),
-                "symbol": symbol,
-                "score": float(row.score),
-                "percentile": float(row.percentile),
-                "close": None if pd.isna(row.close) else float(row.close),
-                "metadata": {
-                    "company_name": cached.get("longName", "") or symbol,
-                    "industry": cached.get("industry", "") or "N/A",
-                    "sector": cached.get("sector", "") or "N/A",
-                    "category": cached.get("category", "") or "N/A",
-                    "market_name": cached.get("marketName", "") or "N/A",
-                    "exchange": cached.get("exchange", "") or "N/A",
-                    "currency": cached.get("currency", "") or "N/A",
-                    "description": cached.get("description", "") or "N/A",
-                    "pe": cached.get("pe", "") or "N/A",
-                },
-                "price_stats": _build_price_stats(project_root, symbol),
-            }
-        )
-    return rows
-
-
 def main() -> None:
     args = parse_args()
     project_root = Path(__file__).resolve().parent
     settings = Settings.load()
     init_db(settings.db_path)
     ensure_default_models(settings.db_path)
-
-    qlib_qrun = Path("/home/song/projects/qlib/.venv/bin/qrun")
+    runtime_cfg = load_qlib_runtime_config(project_root)
+    qlib_qrun = runtime_cfg.qlib_qrun_bin
     if not qlib_qrun.exists():
-        raise SystemExit("Missing qrun: /home/song/projects/qlib/.venv/bin/qrun")
+        raise SystemExit(f"Missing qrun: {qlib_qrun}")
 
     start_date = dt.date.fromisoformat(args.start_date)
     trading_days = read_available_trading_days(project_root)
@@ -150,10 +106,7 @@ def main() -> None:
     if not selected_days:
         raise SystemExit("No trading days found in the selected date range")
 
-    base_path = project_root / args.workflow_base
-    if not base_path.exists():
-        raise SystemExit(f"Base workflow not found: {base_path}")
-    base_workflow = yaml.safe_load(base_path.read_text(encoding="utf-8"))
+    base_workflow = load_base_workflow(project_root, args.workflow_base)
     model_id = (
         args.model_id
         if args.model_id is not None
@@ -185,36 +138,30 @@ def main() -> None:
         console_lines: list[str] = []
         log(f"[info] [{index}/{len(selected_days)}] backfilling {trade_date_str}", console_lines)
 
-        wf = yaml.safe_load(yaml.safe_dump(base_workflow, sort_keys=False, allow_unicode=False))
-        wf["data_handler_config"]["end_time"] = trade_date_str
-        wf["task"]["dataset"]["kwargs"]["segments"]["test"][1] = trade_date_str
-        wf["task"]["record"] = [
-            record
-            for record in wf["task"]["record"]
-            if str(record.get("class")) != "PortAnaRecord"
-        ]
-
         backtest_end = trade_date
         prior_days = [day for day in trading_days if day < trade_date]
         if prior_days:
             backtest_end = prior_days[-1]
-        wf["port_analysis_config"]["backtest"]["end_time"] = backtest_end.isoformat()
-
-        tmp_dir = project_root / "reports" / "tmp"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-        runtime_wf = tmp_dir / f"workflow_backfill_{trade_date_str}.yaml"
-        runtime_wf.write_text(yaml.safe_dump(wf, sort_keys=False, allow_unicode=False), encoding="utf-8")
+        runtime_wf, experiment_name = build_backfill_runtime_workflow(
+            runtime_cfg=runtime_cfg,
+            workflow_base=args.workflow_base,
+            model_key=str(model["key"]),
+            trade_date=trade_date,
+            backtest_end=backtest_end,
+            base_workflow=base_workflow,
+        )
         log(f"[ok] runtime workflow: {runtime_wf}", console_lines)
         log(f"[ok] target_trade_date={trade_date_str} backtest_end={backtest_end.isoformat()}", console_lines)
         log("[ok] backfill mode disabled PortAnaRecord for faster, benchmark-free replay", console_lines)
+        log(f"[ok] experiment_name={experiment_name}", console_lines)
 
-        qrun_env = os.environ.copy()
-        qrun_env["GIT_DIR"] = str(qlib_qrun.parent.parent.parent / ".git")
-        qrun_env["GIT_WORK_TREE"] = str(qlib_qrun.parent.parent.parent)
-        before_mtime = dt.datetime.now().timestamp()
-        run_cmd([str(qlib_qrun), str(runtime_wf)], cwd=project_root, console_lines=console_lines, env=qrun_env)
-
-        pred_path, exp_id, rec_id = find_latest_pred_after(project_root, before_mtime)
+        pred_path, exp_id, rec_id = run_qlib_workflow(
+            runtime_cfg=runtime_cfg,
+            runtime_workflow_path=runtime_wf,
+            experiment_name=experiment_name,
+            cwd=project_root,
+            console_lines=console_lines,
+        )
         log(f"[ok] pred={pred_path}", console_lines)
         log(f"[ok] experiment_id={exp_id} recorder_id={rec_id}", console_lines)
 

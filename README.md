@@ -166,6 +166,8 @@ PYTHONPATH=/home/song/projects/ib-qlib-pipeline /home/song/projects/qlib/.venv/b
 `run_daily_ranking.sh`
 - 面向“当天实时运行”
 - 会更新本地数据，并生成最新 ranking
+- 运行时会为本次 qrun 生成唯一 `experiment_name`
+- 只会读取本次新生成 recorder 的 `pred.pkl`，不再按全局文件修改时间猜测
 
 `backfill_rankings.py`
 - 面向“历史回放”
@@ -226,6 +228,12 @@ cd /home/song/projects/ib-qlib-pipeline
 - `RANKING_API_HOST`
 - `RANKING_API_PORT`
 - `RANKING_API_RUN_SCRIPT`
+- `QLIB_REPO_PATH`
+- `QLIB_PYTHON_BIN`
+- `QLIB_QRUN_BIN`
+- `PROJECT_DATA_DIR`
+- `RUN_WORKSPACE_DIR`
+- `MLRUNS_DIR`
 
 ### 10.3 启动前端
 

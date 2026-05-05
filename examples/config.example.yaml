@@ -27,5 +27,8 @@ output:
 
 qlib:
   enabled: false
-  qlib_repo_path: /home/song/projects/qlib
-  python_bin: /home/song/projects/qlib/.venv/bin/python
+  qlib_repo_path: ../qlib
+  python_bin: ../qlib/.venv/bin/python
+  qrun_bin: ../qlib/.venv/bin/qrun
+  workspace_dir: reports/tmp
+  mlruns_dir: mlruns

@@ -12,7 +12,8 @@ One command to:
 ## Files
 
 - runner script: `run_daily_ranking.sh`
-- core logic: `oneclick_daily_ranking.py`
+- CLI entrypoint: `oneclick_daily_ranking.py`
+- orchestration: `ib_qlib_pipeline/runner/daily_ranking_runner.py`
 - output ranking: `reports/rankings/sp500_ranking_YYYY-MM-DD.csv`
   - if same day re-run: `sp500_ranking_YYYY-MM-DD-01.csv`, `-02.csv`, ...
 
@@ -23,7 +24,7 @@ One command to:
 3. Python env for pipeline exists:
    - `/home/song/projects/ib-qlib-pipeline/.venv`
 4. Qlib env exists:
-   - `/home/song/projects/qlib/.venv`
+   - path comes from `config.yaml` / env
    - includes `qrun`
 
 ## Usage (minimal input)
@@ -61,9 +62,11 @@ python run.py --config config.yaml --client-id <id> --start-date <today-lookback
 - `data_handler_config.end_time = latest available trading day in qlib calendar`
 - `dataset.test end = latest available trading day`
 - `backtest end = previous trading day` (avoids Qlib last-day backtest boundary issue)
+- `experiment_name = unique runtime token`
 
 3. Runs qrun with that runtime yaml.
-4. Reads latest `pred.pkl` from `mlruns`, merges same-day close, exports ranking csv.
+4. Locates the new recorder created by this specific run.
+5. Reads that recorder's `pred.pkl`, merges same-day close, exports ranking csv.
 
 ## How Ranking Is Produced
 
@@ -89,16 +92,18 @@ self.save(**{"pred.pkl": pred})
 
 So the prediction matrix is already persisted by Qlib into `pred.pkl`.
 
-4. `oneclick_daily_ranking.py` finds the newest `pred.pkl` under `mlruns/`.
-5. It loads that pickle into pandas.
-6. It detects the latest prediction date (`signal_date`).
-7. It filters the dataframe to only that one date.
-8. It sorts all symbols by `score` descending.
-9. It assigns:
+4. `DailyRankingRunner` writes a unique `experiment_name` into the runtime workflow.
+5. Before `qrun`, it snapshots recorder ids under that experiment.
+6. After `qrun`, it finds the new recorder created by this exact run.
+7. It loads that recorder's `pred.pkl` into pandas.
+8. It detects the latest prediction date (`signal_date`).
+9. It filters the dataframe to only that one date.
+10. It sorts all symbols by `score` descending.
+11. It assigns:
    - `rank = 1, 2, 3, ...`
    - `percentile`
-10. It looks up the same-day `close` price from `data/processed/qlib_csv/<SYMBOL>.csv`.
-11. It writes the final ranking CSV to:
+12. It looks up the same-day `close` price from `data/processed/qlib_csv/<SYMBOL>.csv`.
+13. It writes the final ranking CSV to:
 
 `reports/rankings/sp500_ranking_YYYY-MM-DD.csv`
 
@@ -122,7 +127,7 @@ In practice, the script does this:
 3. Calls:
 
 ```bash
-/home/song/projects/qlib/.venv/bin/qrun reports/tmp/workflow_runtime_YYYY-MM-DD.yaml
+<QLIB_QRUN_BIN> reports/tmp/workflow_runtime_YYYY-MM-DD.yaml
 ```
 
 4. Qlib then:
@@ -138,15 +143,39 @@ So the daily ranking is based on the exact same Qlib workflow outputs, not on a 
 
 ## Relevant Code Paths
 
-- ranking loader/export: `oneclick_daily_ranking.py`
+- CLI entry: `oneclick_daily_ranking.py`
+- daily orchestration: `ib_qlib_pipeline/runner/daily_ranking_runner.py`
+- runtime workflow builder: `ib_qlib_pipeline/runner/runtime_workflow.py`
+- qrun executor: `ib_qlib_pipeline/runner/qlib_runner.py`
+- artifact locator: `ib_qlib_pipeline/runner/artifact_locator.py`
+- ranking loader/export: `ib_qlib_pipeline/ranking/ranking_loader.py`
 - workflow config: `examples/workflow_us_lgb_2020_port.yaml`
 - Qlib prediction artifact generation: `qlib.workflow.record_temp.SignalRecord`
+- runtime config: `ib_qlib_pipeline/qlib_runtime.py`
+
+## Runtime Path Config
+
+These paths are no longer hardcoded inside the ranking scripts.
+
+Priority is:
+
+1. environment variables
+2. `config.yaml`
+
+Supported environment variables:
+
+- `QLIB_REPO_PATH`
+- `QLIB_PYTHON_BIN`
+- `QLIB_QRUN_BIN`
+- `PROJECT_DATA_DIR`
+- `RUN_WORKSPACE_DIR`
+- `MLRUNS_DIR`
 
 If you want to change how the ranking is generated, the main levers are:
 
 - change the workflow yaml model or dataset config
 - change the test segment end date logic
-- change how `oneclick_daily_ranking.py` filters/sorts `pred.pkl`
+- change how `ib_qlib_pipeline/ranking/ranking_loader.py` filters/sorts `pred.pkl`
 
 ## Output columns
 
@@ -167,4 +196,4 @@ If you want to change how the ranking is generated, the main levers are:
 - If cannot connect IB:
   - check `config.yaml` host/port/client_id and TWS API settings.
 - If `qrun` missing:
-  - verify `/home/song/projects/qlib/.venv/bin/qrun` exists.
+  - verify `QLIB_QRUN_BIN` or `config.yaml -> qlib.qrun_bin` points to a valid binary.

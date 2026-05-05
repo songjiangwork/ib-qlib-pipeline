@@ -21,7 +21,7 @@ from ib_qlib_pipeline.webapi.portfolio_store import (
     update_portfolio_run_end_date,
 )
 from ib_qlib_pipeline.webapi.settings import Settings
-from oneclick_daily_ranking import read_available_trading_days
+from ib_qlib_pipeline.ranking.ranking_loader import read_available_trading_days
 
 
 def parse_args() -> argparse.Namespace:

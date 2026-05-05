@@ -54,6 +54,9 @@ class QlibConfig:
     enabled: bool
     qlib_repo_path: str
     python_bin: str
+    qrun_bin: Optional[str] = None
+    workspace_dir: Optional[str] = None
+    mlruns_dir: Optional[str] = None
 
 
 @dataclass
