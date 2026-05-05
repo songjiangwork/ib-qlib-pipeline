@@ -57,6 +57,65 @@ def create_portfolio_run(
         return int(cursor.lastrowid)
 
 
+def update_portfolio_run_end_date(
+    *,
+    db_path: Path,
+    portfolio_run_id: int,
+    end_signal_date: str,
+    name: str | None = None,
+) -> None:
+    with connect(db_path) as conn:
+        if name is None:
+            conn.execute(
+                """
+                UPDATE portfolio_runs
+                SET end_signal_date = ?
+                WHERE id = ?
+                """,
+                (end_signal_date, portfolio_run_id),
+            )
+        else:
+            conn.execute(
+                """
+                UPDATE portfolio_runs
+                SET end_signal_date = ?,
+                    name = ?
+                WHERE id = ?
+                """,
+                (end_signal_date, name, portfolio_run_id),
+            )
+
+
+def load_open_lots(db_path: Path, portfolio_run_id: int) -> dict[str, list[OpenLot]]:
+    with connect(db_path) as conn:
+        rows = conn.execute(
+            """
+            SELECT id, symbol, entry_run_id, entry_signal_date, entry_trade_date,
+                   entry_rank, entry_price_open, shares, target_notional
+            FROM portfolio_lots
+            WHERE portfolio_run_id = ?
+              AND status = 'open'
+            ORDER BY symbol, id
+            """,
+            (portfolio_run_id,),
+        ).fetchall()
+    lots: dict[str, list[OpenLot]] = {}
+    for row in rows:
+        lot = OpenLot(
+            id=int(row["id"]),
+            symbol=str(row["symbol"]),
+            entry_run_id=int(row["entry_run_id"]),
+            entry_signal_date=str(row["entry_signal_date"]),
+            entry_trade_date=str(row["entry_trade_date"]),
+            entry_rank=int(row["entry_rank"]),
+            entry_price_open=float(row["entry_price_open"]),
+            shares=int(row["shares"]),
+            target_notional=float(row["target_notional"]),
+        )
+        lots.setdefault(lot.symbol, []).append(lot)
+    return lots
+
+
 def insert_portfolio_lot(
     *,
     db_path: Path,

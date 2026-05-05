@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -13,8 +14,11 @@ from ib_qlib_pipeline.webapi.portfolio_store import (
     OpenLot,
     close_portfolio_lot,
     create_portfolio_run,
+    get_portfolio_run,
     insert_portfolio_lot,
     insert_portfolio_mark,
+    load_open_lots,
+    update_portfolio_run_end_date,
 )
 from ib_qlib_pipeline.webapi.settings import Settings
 from oneclick_daily_ranking import read_available_trading_days
@@ -27,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-date", default="2025-01-01", help="Start signal date in YYYY-MM-DD format")
     parser.add_argument("--end-date", default=None, help="End signal date in YYYY-MM-DD format")
     parser.add_argument("--name", default=None, help="Optional portfolio run label")
+    parser.add_argument("--append-run-id", type=int, default=None, help="Append new signal days into an existing portfolio run")
     parser.add_argument("--model-id", type=int, default=None, help="Only simulate rankings from the specified model id")
     parser.add_argument("--buy-top-n", type=int, default=10, help="Buy new symbols from top N each signal day")
     parser.add_argument("--hold-top-n", type=int, default=20, help="Continue holding while symbol stays within top N")
@@ -116,6 +121,35 @@ def next_trade_date_map(trading_days: list[dt.date]) -> dict[dt.date, dt.date]:
     return mapping
 
 
+def trade_date_has_existing_activity(db_path: Path, portfolio_run_id: int, trade_date: dt.date) -> bool:
+    trade_date_str = trade_date.isoformat()
+    with connect(db_path) as conn:
+        row = conn.execute(
+            """
+            SELECT
+              EXISTS(
+                SELECT 1
+                FROM portfolio_marks pm
+                JOIN portfolio_lots pl ON pl.id = pm.portfolio_lot_id
+                WHERE pl.portfolio_run_id = ?
+                  AND pm.trade_date = ?
+              ) AS has_marks,
+              EXISTS(
+                SELECT 1
+                FROM portfolio_lots
+                WHERE portfolio_run_id = ?
+                  AND (entry_trade_date = ? OR exit_trade_date = ?)
+              ) AS has_trades
+            """,
+            (portfolio_run_id, trade_date_str, portfolio_run_id, trade_date_str, trade_date_str),
+        ).fetchone()
+    return bool(row["has_marks"]) or bool(row["has_trades"])
+
+
+def updated_run_name(existing_name: str, end_signal_date: dt.date) -> str:
+    return re.sub(r"\d{4}-\d{2}-\d{2}$", end_signal_date.isoformat(), existing_name)
+
+
 def simulate() -> None:
     args = parse_args()
     settings = Settings.load()
@@ -127,32 +161,75 @@ def simulate() -> None:
 
     start_date = dt.date.fromisoformat(args.start_date)
     end_date = dt.date.fromisoformat(args.end_date) if args.end_date else None
-    signal_map = load_signal_map(settings.db_path, args.start_date, args.end_date, args.model_id)
+    append_run_id = args.append_run_id
+
+    existing_run_name: str | None = None
+    existing_end_date: dt.date | None = None
+    if append_run_id is not None:
+        existing_run = get_portfolio_run(settings.db_path, append_run_id)
+        if existing_run is None:
+            raise SystemExit(f"Portfolio run not found: {append_run_id}")
+
+        existing_end = existing_run.get("end_signal_date")
+        if not existing_end:
+            raise SystemExit(f"Portfolio run {append_run_id} has no end_signal_date")
+        existing_end_date = dt.date.fromisoformat(str(existing_end))
+        existing_run_name = str(existing_run["name"])
+        if existing_end_date > start_date:
+            start_date = existing_end_date
+        if end_date is not None and end_date < start_date:
+            raise SystemExit(
+                f"No new signal days to append: existing end_signal_date={existing_end_date.isoformat()} "
+                f"already covers requested range ending at {end_date.isoformat()}"
+            )
+
+        args.buy_top_n = int(existing_run["buy_top_n"])
+        args.hold_top_n = int(existing_run["hold_top_n"])
+        args.target_notional = float(existing_run["target_notional"])
+        if args.model_id is None:
+            args.model_id = int(existing_run["model_id"]) if existing_run.get("model_id") is not None else None
+        elif existing_run.get("model_id") is not None and int(existing_run["model_id"]) != int(args.model_id):
+            raise SystemExit(
+                f"Model mismatch: portfolio run {append_run_id} uses model_id={existing_run['model_id']}, "
+                f"but --model-id={args.model_id} was provided"
+            )
+
+    signal_map = load_signal_map(settings.db_path, start_date.isoformat(), end_date.isoformat() if end_date else None, args.model_id)
     if not signal_map:
         raise SystemExit("No ranking runs found in DB for the selected signal date range")
 
     signal_days = sorted(dt.date.fromisoformat(value) for value in signal_map.keys())
     if end_date is None:
         end_date = signal_days[-1]
-    model_suffix = f"-model{args.model_id}" if args.model_id is not None else ""
-    run_name = (
-        args.name
-        or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
-    )
-    portfolio_run_id = create_portfolio_run(
-        db_path=settings.db_path,
-        name=run_name,
-        strategy="t_minus_1_rank__t_open_execute",
-        buy_top_n=args.buy_top_n,
-        hold_top_n=args.hold_top_n,
-        target_notional=args.target_notional,
-        start_signal_date=args.start_date,
-        end_signal_date=end_date.isoformat(),
-        notes=args.notes,
-    )
+    if append_run_id is not None:
+        portfolio_run_id = append_run_id
+        open_lots = load_open_lots(settings.db_path, portfolio_run_id)
+        print(
+            f"[info] appending portfolio_run_id={portfolio_run_id} "
+            f"from {start_date.isoformat()} to {end_date.isoformat()} "
+            f"existing_open_lots={sum(len(v) for v in open_lots.values())}"
+        )
+    else:
+        model_suffix = f"-model{args.model_id}" if args.model_id is not None else ""
+        run_name = (
+            args.name
+            or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
+        )
+        portfolio_run_id = create_portfolio_run(
+            db_path=settings.db_path,
+            name=run_name,
+            strategy="t_minus_1_rank__t_open_execute",
+            buy_top_n=args.buy_top_n,
+            hold_top_n=args.hold_top_n,
+            target_notional=args.target_notional,
+            start_signal_date=args.start_date,
+            end_signal_date=end_date.isoformat(),
+            notes=args.notes,
+        )
+        open_lots = {}
 
-    open_lots: dict[str, list[OpenLot]] = {}
     processed_signals = 0
+    last_processed_signal_date: dt.date | None = None
 
     for signal_date in signal_days:
         if signal_date < start_date or signal_date > end_date:
@@ -160,6 +237,13 @@ def simulate() -> None:
         trade_date = next_day.get(signal_date)
         if trade_date is None:
             print(f"[skip] {signal_date.isoformat()} has no next trade date")
+            continue
+        if append_run_id is not None and trade_date_has_existing_activity(settings.db_path, portfolio_run_id, trade_date):
+            print(
+                f"[skip] signal={signal_date.isoformat()} trade={trade_date.isoformat()} "
+                f"already applied to portfolio_run_id={portfolio_run_id}"
+            )
+            last_processed_signal_date = signal_date
             continue
 
         bucket = signal_map[signal_date.isoformat()]
@@ -249,10 +333,22 @@ def simulate() -> None:
                 )
 
         processed_signals += 1
+        last_processed_signal_date = signal_date
         print(
             f"[ok] signal={signal_date.isoformat()} trade={trade_date.isoformat()} "
             f"held={sum(len(v) for v in open_lots.values())}"
         )
+
+    effective_end_date = last_processed_signal_date or existing_end_date or end_date
+    if effective_end_date is None:
+        raise SystemExit("Unable to determine effective end signal date")
+    new_name = updated_run_name(existing_run_name, effective_end_date) if existing_run_name is not None else None
+    update_portfolio_run_end_date(
+        db_path=settings.db_path,
+        portfolio_run_id=portfolio_run_id,
+        end_signal_date=effective_end_date.isoformat(),
+        name=new_name,
+    )
 
     print(
         f"[ok] portfolio_run_id={portfolio_run_id} processed_signals={processed_signals} "
