@@ -842,17 +842,26 @@ class RankingBackendService:
         )
 
         models = [model for model in list_models(self.settings.db_path) if model.get("workflow_base")]
+        trading_days = read_available_trading_days(self.settings.project_root)
+        start_bound = dt.date.fromisoformat(start_date)
         for model in models:
-            self._run_job_step(
-                job_id,
-                f"backfill_{model['key']}",
-                self._build_backfill_command(
-                    signal_date=trade_date.isoformat(),
-                    workflow_base=str(model["workflow_base"]),
-                    model_id=int(model["id"]),
-                    client_id=client_id,
-                ),
+            missing_days = self._missing_signal_days_for_model(
+                model_id=int(model["id"]),
+                trade_date=trade_date,
+                trading_days=trading_days,
+                fallback_start_date=start_bound,
             )
+            for signal_day in missing_days:
+                self._run_job_step(
+                    job_id,
+                    f"backfill_{model['key']}_{signal_day.isoformat()}",
+                    self._build_backfill_command(
+                        signal_date=signal_day.isoformat(),
+                        workflow_base=str(model["workflow_base"]),
+                        model_id=int(model["id"]),
+                        client_id=client_id,
+                    ),
+                )
 
         if not include_portfolio:
             return
@@ -1082,6 +1091,36 @@ class RankingBackendService:
         if not prior_days:
             raise RuntimeError(f"No prior trading day found before {trade_date.isoformat()}")
         return prior_days[-1]
+
+    def _latest_backfill_signal_date_for_model(self, model_id: int) -> dt.date | None:
+        with connect(self.settings.db_path) as conn:
+            row = conn.execute(
+                """
+                SELECT MAX(signal_date) AS latest_signal_date
+                FROM runs
+                WHERE status = 'succeeded'
+                  AND trigger_source = 'backfill'
+                  AND model_id = ?
+                  AND signal_date IS NOT NULL
+                """,
+                (model_id,),
+            ).fetchone()
+        latest_signal = row["latest_signal_date"] if row is not None else None
+        if not latest_signal:
+            return None
+        return dt.date.fromisoformat(str(latest_signal))
+
+    def _missing_signal_days_for_model(
+        self,
+        *,
+        model_id: int,
+        trade_date: dt.date,
+        trading_days: list[dt.date],
+        fallback_start_date: dt.date,
+    ) -> list[dt.date]:
+        latest_signal = self._latest_backfill_signal_date_for_model(model_id)
+        start_day = fallback_start_date if latest_signal is None else latest_signal + dt.timedelta(days=1)
+        return [day for day in trading_days if start_day <= day <= trade_date]
 
     def _latest_portfolio_run_for_model(self, model_id: int) -> dict[str, Any] | None:
         for row in list_portfolio_runs(self.settings.db_path):

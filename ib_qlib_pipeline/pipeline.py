@@ -500,8 +500,9 @@ def run() -> int:
                     _log(f"[info] up-to-date prices for {qlib_symbol}; latest={latest_existing}", report_messages)
                     needs_price_fetch = False
                 else:
-                    # Keep one-day overlap to handle data revisions and ensure continuity.
-                    fetch_start = max(start_date, latest_existing - dt.timedelta(days=1))
+                    # Always continue from the latest local bar so missed service days
+                    # are backfilled end-to-end, regardless of the configured start_date.
+                    fetch_start = latest_existing - dt.timedelta(days=1)
                     _log(
                         f"[info] incremental fetch for {qlib_symbol}: "
                         f"{fetch_start} -> {end_date} (latest={latest_existing})",
