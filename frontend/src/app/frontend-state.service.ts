@@ -21,6 +21,24 @@ export interface BackendConfig {
   run_script_path: string;
 }
 
+export interface ScheduleItem {
+  id: number;
+  name: string;
+  enabled: number;
+  timezone: string;
+  day_of_week: string;
+  hour: number;
+  minute: number;
+  client_id: number;
+  lookback_days: number;
+  workflow_base: string;
+  created_at: string;
+  updated_at: string;
+  last_triggered_at?: string | null;
+  last_run_id?: number | null;
+  last_run_status?: string | null;
+}
+
 export interface ModelRef {
   id: number;
   key: string;
@@ -243,6 +261,7 @@ export class FrontendStateService {
   readonly selectedSymbolPriceBars = signal<PriceBar[]>([]);
   readonly selectedPriceInterval = signal<'1d'>('1d');
   readonly jobs = signal<JobSummary[]>([]);
+  readonly schedules = signal<ScheduleItem[]>([]);
   readonly selectedJobId = signal<number | null>(null);
   readonly selectedJobDetail = signal<JobDetail | null>(null);
   readonly jobsLoading = signal(false);
@@ -301,10 +320,20 @@ export class FrontendStateService {
         const models = await firstValueFrom(this.http.get<ModelRef[]>('/api/models'));
         this.models.set(models ?? []);
       }
+      await this.loadSchedules();
       await this.loadJobs();
       await this.loadOperationsSummary(localDateIso());
     } catch {
       this.jobActionError.set(this.i18n.t('failedJobs'));
+    }
+  }
+
+  async loadSchedules(): Promise<void> {
+    try {
+      const schedules = await firstValueFrom(this.http.get<ScheduleItem[]>('/api/schedules'));
+      this.schedules.set(schedules ?? []);
+    } catch {
+      this.jobActionError.set(this.i18n.t('failedSchedules'));
     }
   }
 
@@ -363,6 +392,7 @@ export class FrontendStateService {
       ]);
       this.recentRuns.set(runs ?? []);
       this.portfolioRuns.set(portfolioRuns ?? []);
+      await this.loadSchedules();
       if (this.selectedPortfolioRunId() !== null) {
         const selected = this.selectedPortfolioRunId()!;
         if ((portfolioRuns ?? []).some((run) => run.id === selected)) {
@@ -468,6 +498,50 @@ export class FrontendStateService {
       }
     } catch (error: any) {
       this.jobActionError.set(error?.error?.detail || this.i18n.t('failedRetryJob'));
+    }
+  }
+
+  async createSchedule(payload: {
+    name: string;
+    hour: number;
+    minute: number;
+    day_of_week: string;
+    timezone: string;
+    client_id: number;
+    lookback_days: number;
+    workflow_base: string;
+    enabled: boolean;
+  }): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      await firstValueFrom(this.http.post<ScheduleItem>('/api/schedules', payload));
+      await this.loadSchedules();
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedCreateSchedule'));
+    }
+  }
+
+  async toggleSchedule(schedule: ScheduleItem): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      await firstValueFrom(
+        this.http.patch<ScheduleItem>(`/api/schedules/${schedule.id}`, {
+          enabled: !Boolean(schedule.enabled),
+        }),
+      );
+      await this.loadSchedules();
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedUpdateSchedule'));
+    }
+  }
+
+  async deleteSchedule(scheduleId: number): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      await firstValueFrom(this.http.delete(`/api/schedules/${scheduleId}`));
+      await this.loadSchedules();
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedDeleteSchedule'));
     }
   }
 

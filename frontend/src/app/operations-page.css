@@ -131,6 +131,12 @@
   margin-bottom: 14px;
 }
 
+.inline-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
 .field input,
 .field select {
   border: 1px solid var(--line);
@@ -155,9 +161,45 @@
   cursor: pointer;
 }
 
+.secondary {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  cursor: pointer;
+}
+
+.secondary.danger {
+  color: var(--danger);
+}
+
 .stack {
   display: grid;
   gap: 10px;
+}
+
+.schedule-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.schedule-card {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.62);
+  display: grid;
+  gap: 6px;
+}
+
+.schedule-head,
+.schedule-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
 }
 
 .item-card {

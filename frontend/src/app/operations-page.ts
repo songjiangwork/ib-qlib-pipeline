@@ -43,6 +43,14 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected readonly backfillModelId = signal<number | null>(null);
   protected readonly appendPortfolioRunId = signal<number | null>(null);
   protected readonly appendEndDate = signal(daysAgoIso(1));
+  protected readonly scheduleName = signal('Daily Close');
+  protected readonly scheduleHour = signal(16);
+  protected readonly scheduleMinute = signal(10);
+  protected readonly scheduleClientId = signal(151);
+  protected readonly scheduleLookbackDays = signal(7);
+  protected readonly scheduleWorkflowBase = signal('examples/workflow_us_lgb_2020_port.yaml');
+  protected readonly scheduleDayOfWeek = signal('mon-fri');
+  protected readonly scheduleTimezone = signal('America/Edmonton');
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   @ViewChildren('liveLog') private liveLogs!: QueryList<ElementRef<HTMLElement>>;
 
@@ -55,6 +63,9 @@ export class OperationsPage implements OnInit, OnDestroy {
     await this.state.loadOperationsData();
     if (this.state.models().length && this.backfillModelId() === null) {
       this.backfillModelId.set(this.state.models()[0].id);
+    }
+    if (this.state.models().length) {
+      this.scheduleWorkflowBase.set(this.state.models()[0].workflow_base || 'examples/workflow_us_lgb_2020_port.yaml');
     }
     if (this.state.portfolioRuns().length && this.appendPortfolioRunId() === null) {
       this.appendPortfolioRunId.set(this.state.portfolioRuns()[0].id);
@@ -135,5 +146,31 @@ export class OperationsPage implements OnInit, OnDestroy {
     }
     const maxOrder = Math.max(...steps.map((step) => step.step_order));
     return stepOrder === maxOrder && this.state.selectedJobDetail()?.status === 'succeeded';
+  }
+
+  protected async createSchedule(): Promise<void> {
+    await this.state.createSchedule({
+      name: this.scheduleName(),
+      hour: this.scheduleHour(),
+      minute: this.scheduleMinute(),
+      day_of_week: this.scheduleDayOfWeek(),
+      timezone: this.scheduleTimezone(),
+      client_id: this.scheduleClientId(),
+      lookback_days: this.scheduleLookbackDays(),
+      workflow_base: this.scheduleWorkflowBase(),
+      enabled: true,
+    });
+  }
+
+  protected async toggleSchedule(schedule: { enabled: number; id: number }): Promise<void> {
+    const row = this.state.schedules().find((item) => item.id === schedule.id);
+    if (!row) {
+      return;
+    }
+    await this.state.toggleSchedule(row);
+  }
+
+  protected async deleteSchedule(scheduleId: number): Promise<void> {
+    await this.state.deleteSchedule(scheduleId);
   }
 }
