@@ -104,7 +104,7 @@ def _ensure_dirs(paths: Iterable[Path]) -> None:
 
 
 def _log(message: str, messages: list[str]) -> None:
-    print(message)
+    print(message, flush=True)
     messages.append(message)
 
 
@@ -492,11 +492,13 @@ def run() -> int:
             metadata_path = _metadata_cache_path(metadata_dir, qlib_symbol)
             existing = _read_existing_prices(qlib_price_path) if cfg.data.skip_existing_prices else pd.DataFrame()
             fetch_start = start_date
+            needs_price_fetch = True
             metadata = _load_metadata_cache(metadata_dir, qlib_symbol)
             if not existing.empty:
                 latest_existing = pd.to_datetime(existing["date"]).dt.date.max()
                 if latest_existing >= end_date:
                     _log(f"[info] up-to-date prices for {qlib_symbol}; latest={latest_existing}", report_messages)
+                    needs_price_fetch = False
                 else:
                     # Keep one-day overlap to handle data revisions and ensure continuity.
                     fetch_start = max(start_date, latest_existing - dt.timedelta(days=1))
@@ -507,7 +509,7 @@ def run() -> int:
                     )
 
             merged = existing
-            if existing.empty or fetch_start <= end_date:
+            if needs_price_fetch and fetch_start <= end_date:
                 if existing.empty:
                     _log(f"[info] fetching prices for {qlib_symbol} (ib={ib_symbol})...", report_messages)
                 try:
@@ -593,10 +595,10 @@ def main() -> None:
     try:
         rc = run()
     except PipelineError as exc:
-        print(f"[fatal] {exc}")
+        print(f"[fatal] {exc}", flush=True)
         raise SystemExit(1) from exc
     except KeyboardInterrupt:
-        print("[fatal] interrupted")
+        print("[fatal] interrupted", flush=True)
         raise SystemExit(130)
     raise SystemExit(rc)
 

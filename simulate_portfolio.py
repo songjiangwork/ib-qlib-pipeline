@@ -24,6 +24,10 @@ from ib_qlib_pipeline.webapi.settings import Settings
 from ib_qlib_pipeline.ranking.ranking_loader import read_available_trading_days
 
 
+def status(message: str) -> None:
+    print(message, flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Simulate per-stock lots using T-1 rankings and T open execution.",
@@ -204,7 +208,7 @@ def simulate() -> None:
     if append_run_id is not None:
         portfolio_run_id = append_run_id
         open_lots = load_open_lots(settings.db_path, portfolio_run_id)
-        print(
+        status(
             f"[info] appending portfolio_run_id={portfolio_run_id} "
             f"from {start_date.isoformat()} to {end_date.isoformat()} "
             f"existing_open_lots={sum(len(v) for v in open_lots.values())}"
@@ -236,10 +240,10 @@ def simulate() -> None:
             continue
         trade_date = next_day.get(signal_date)
         if trade_date is None:
-            print(f"[skip] {signal_date.isoformat()} has no next trade date")
+            status(f"[skip] {signal_date.isoformat()} has no next trade date")
             continue
         if append_run_id is not None and trade_date_has_existing_activity(settings.db_path, portfolio_run_id, trade_date):
-            print(
+            status(
                 f"[skip] signal={signal_date.isoformat()} trade={trade_date.isoformat()} "
                 f"already applied to portfolio_run_id={portfolio_run_id}"
             )
@@ -259,7 +263,7 @@ def simulate() -> None:
                 continue
             exit_price = get_price(project_root, symbol, trade_date, "open")
             if exit_price is None:
-                print(f"[warn] missing open price for sell {symbol} on {trade_date.isoformat()}, keeping lot open")
+                status(f"[warn] missing open price for sell {symbol} on {trade_date.isoformat()}, keeping lot open")
                 continue
             for lot in lots:
                 close_portfolio_lot(
@@ -278,11 +282,11 @@ def simulate() -> None:
                 continue
             entry_price = get_price(project_root, symbol, trade_date, "open")
             if entry_price is None or entry_price <= 0:
-                print(f"[warn] missing open price for buy {symbol} on {trade_date.isoformat()}, skipping")
+                status(f"[warn] missing open price for buy {symbol} on {trade_date.isoformat()}, skipping")
                 continue
             shares = int(args.target_notional // entry_price)
             if shares <= 0:
-                print(f"[warn] zero shares for {symbol} on {trade_date.isoformat()} at price {entry_price}")
+                status(f"[warn] zero shares for {symbol} on {trade_date.isoformat()} at price {entry_price}")
                 continue
             lot_id = insert_portfolio_lot(
                 db_path=settings.db_path,
@@ -313,7 +317,7 @@ def simulate() -> None:
         for symbol, lots in open_lots.items():
             close_price = get_price(project_root, symbol, trade_date, "close")
             if close_price is None:
-                print(f"[warn] missing close price for mark {symbol} on {trade_date.isoformat()}, skipping mark")
+                status(f"[warn] missing close price for mark {symbol} on {trade_date.isoformat()}, skipping mark")
                 continue
             for lot in lots:
                 market_value = close_price * lot.shares
@@ -334,7 +338,7 @@ def simulate() -> None:
 
         processed_signals += 1
         last_processed_signal_date = signal_date
-        print(
+        status(
             f"[ok] signal={signal_date.isoformat()} trade={trade_date.isoformat()} "
             f"held={sum(len(v) for v in open_lots.values())}"
         )
@@ -350,7 +354,7 @@ def simulate() -> None:
         name=new_name,
     )
 
-    print(
+    status(
         f"[ok] portfolio_run_id={portfolio_run_id} processed_signals={processed_signals} "
         f"open_lots={sum(len(v) for v in open_lots.values())}"
     )

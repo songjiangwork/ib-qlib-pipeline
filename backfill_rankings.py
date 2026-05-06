@@ -33,6 +33,10 @@ from ib_qlib_pipeline.webapi.run_store import insert_completed_run
 from ib_qlib_pipeline.webapi.settings import Settings
 
 
+def status(message: str) -> None:
+    print(message, flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Backfill daily ranking CSV/HTML outputs and insert historical runs into SQLite.",
@@ -117,10 +121,10 @@ def main() -> None:
         raise SystemExit(f"Model id not found: {model_id}")
     known_dates = existing_signal_dates(settings.db_path, model_id) if args.skip_existing_db else set()
 
-    print(
+    status(
         f"[info] backfill range: {selected_days[0]} -> {selected_days[-1]} ({len(selected_days)} trading days)"
     )
-    print(
+    status(
         f"[info] model_id={model_id} model={model['name']} class={model['model_class']} workflow={args.workflow_base}"
     )
     for index, trade_date in enumerate(selected_days, start=1):
@@ -129,10 +133,10 @@ def main() -> None:
         html_path = backfill_html_path(project_root, str(model["key"]), trade_date)
 
         if args.skip_existing_db and trade_date_str in known_dates:
-            print(f"[skip] {trade_date_str} already exists in DB")
+            status(f"[skip] {trade_date_str} already exists in DB")
             continue
         if args.skip_existing_files and csv_path.exists():
-            print(f"[skip] {trade_date_str} CSV already exists")
+            status(f"[skip] {trade_date_str} CSV already exists")
             continue
 
         console_lines: list[str] = []
@@ -205,7 +209,7 @@ def main() -> None:
             started_at=timestamp,
             finished_at=timestamp,
         )
-        print(f"[ok] inserted run_id={run_id} signal_date={trade_date_str}")
+        status(f"[ok] inserted run_id={run_id} signal_date={trade_date_str}")
 
 
 if __name__ == "__main__":
