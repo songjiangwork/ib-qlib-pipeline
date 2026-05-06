@@ -51,6 +51,27 @@ export interface JobDetail extends JobSummary {
   steps: JobStep[];
 }
 
+export interface OperationsSummaryModel {
+  model_id: number;
+  model_key: string;
+  model_name: string;
+  workflow_base?: string | null;
+  latest_ranking_run_id?: number | null;
+  latest_ranking_signal_date?: string | null;
+  ranking_ready_for_trade_date: boolean;
+  portfolio_run_id?: number | null;
+  portfolio_run_name?: string | null;
+  portfolio_end_signal_date?: string | null;
+  portfolio_ready_for_trade_date: boolean;
+  expected_portfolio_end_signal_date: string;
+}
+
+export interface OperationsSummary {
+  trade_date: string;
+  expected_portfolio_end_signal_date: string;
+  models: OperationsSummaryModel[];
+}
+
 export interface RunSummary {
   id: number;
   trigger_source: string;
@@ -218,6 +239,7 @@ export class FrontendStateService {
   readonly selectedJobDetail = signal<JobDetail | null>(null);
   readonly jobsLoading = signal(false);
   readonly jobActionError = signal<string | null>(null);
+  readonly operationsSummary = signal<OperationsSummary | null>(null);
   readonly loadError = signal<string | null>(null);
   readonly detailError = signal<string | null>(null);
   readonly isLoading = signal(false);
@@ -272,6 +294,7 @@ export class FrontendStateService {
         this.models.set(models ?? []);
       }
       await this.loadJobs();
+      await this.loadOperationsSummary(new Date().toISOString().slice(0, 10));
     } catch {
       this.jobActionError.set(this.i18n.t('failedJobs'));
     }
@@ -280,13 +303,18 @@ export class FrontendStateService {
   async loadJobs(): Promise<void> {
     this.jobsLoading.set(true);
     try {
+      const previousRunning = this.jobs().some((job) => job.status === 'queued' || job.status === 'running');
       const jobs = await firstValueFrom(this.http.get<JobSummary[]>('/api/jobs', { params: { limit: 40 } }));
       this.jobs.set(jobs ?? []);
+      const currentRunning = (jobs ?? []).some((job) => job.status === 'queued' || job.status === 'running');
       const selected = this.selectedJobId();
       if (selected !== null) {
         await this.selectJob(selected);
       } else if ((jobs ?? []).length > 0) {
         await this.selectJob(jobs![0].id);
+      }
+      if (previousRunning && !currentRunning) {
+        await this.refreshOperationalData();
       }
     } catch {
       this.jobActionError.set(this.i18n.t('failedJobs'));
@@ -303,6 +331,41 @@ export class FrontendStateService {
     } catch {
       this.selectedJobDetail.set(null);
       this.jobActionError.set(this.i18n.t('failedJobDetail'));
+    }
+  }
+
+  async loadOperationsSummary(tradeDate: string): Promise<void> {
+    try {
+      const summary = await firstValueFrom(
+        this.http.get<OperationsSummary>('/api/operations/summary', {
+          params: { trade_date: tradeDate },
+        }),
+      );
+      this.operationsSummary.set(summary ?? null);
+    } catch {
+      this.jobActionError.set(this.i18n.t('failedOperationsSummary'));
+    }
+  }
+
+  async refreshOperationalData(): Promise<void> {
+    try {
+      const [runs, portfolioRuns] = await Promise.all([
+        firstValueFrom(this.http.get<RunSummary[]>('/api/runs?limit=500')),
+        firstValueFrom(this.http.get<PortfolioRunSummary[]>('/api/portfolio-runs')),
+      ]);
+      this.recentRuns.set(runs ?? []);
+      this.portfolioRuns.set(portfolioRuns ?? []);
+      if (this.selectedPortfolioRunId() !== null) {
+        const selected = this.selectedPortfolioRunId()!;
+        if ((portfolioRuns ?? []).some((run) => run.id === selected)) {
+          await this.selectPortfolioRun(selected);
+        }
+      }
+      await this.loadRankingDates(true);
+      const summaryTradeDate = this.operationsSummary()?.trade_date ?? new Date().toISOString().slice(0, 10);
+      await this.loadOperationsSummary(summaryTradeDate);
+    } catch {
+      this.jobActionError.set(this.i18n.t('failedJobsRefresh'));
     }
   }
 

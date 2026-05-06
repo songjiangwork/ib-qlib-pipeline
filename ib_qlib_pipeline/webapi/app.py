@@ -77,6 +77,10 @@ def create_app() -> FastAPI:
     def get_jobs(limit: int = Query(default=30, ge=1, le=200)) -> list[dict[str, Any]]:
         return get_service().list_jobs(limit=limit)
 
+    @app.get("/api/operations/summary")
+    def get_operations_summary(trade_date: str = Query(...)) -> dict[str, Any]:
+        return get_service().get_operations_summary(trade_date)
+
     @app.get("/api/jobs/{job_id}")
     def get_job(job_id: int) -> dict[str, Any]:
         try:

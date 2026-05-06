@@ -41,6 +41,7 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected readonly runningJobs = computed(() =>
     this.state.jobs().filter((job) => job.status === 'queued' || job.status === 'running'),
   );
+  protected readonly operationsModels = computed(() => this.state.operationsSummary()?.models ?? []);
 
   async ngOnInit(): Promise<void> {
     await this.state.loadOperationsData();
@@ -83,6 +84,7 @@ export class OperationsPage implements OnInit, OnDestroy {
   }
 
   protected async runDailyClosePipeline(): Promise<void> {
+    await this.state.loadOperationsSummary(this.pipelineTradeDate());
     await this.state.triggerDailyClosePipeline(
       this.pipelineTradeDate(),
       this.pipelineClientId(),
@@ -93,5 +95,9 @@ export class OperationsPage implements OnInit, OnDestroy {
 
   protected async openJob(jobId: number): Promise<void> {
     await this.state.selectJob(jobId);
+  }
+
+  protected async reloadSummary(): Promise<void> {
+    await this.state.loadOperationsSummary(this.pipelineTradeDate());
   }
 }

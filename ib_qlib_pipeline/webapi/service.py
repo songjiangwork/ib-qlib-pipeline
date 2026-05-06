@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+import os
 import re
 import sqlite3
 import subprocess
@@ -173,6 +174,48 @@ class RankingBackendService:
                 (limit,),
             ).fetchall()
         return rows_to_dicts(rows)
+
+    def get_operations_summary(self, trade_date: str) -> dict[str, Any]:
+        trade_day = dt.date.fromisoformat(trade_date)
+        expected_portfolio_end = self._previous_trading_day(trade_day).isoformat()
+        models = list_models(self.settings.db_path)
+        portfolio_runs = list_portfolio_runs(self.settings.db_path)
+        runs = self.list_runs(limit=500, status="succeeded")
+        items: list[dict[str, Any]] = []
+        for model in models:
+            model_runs = [row for row in runs if row.get("model_id") == model["id"]]
+            latest_ranking = next(
+                (
+                    row
+                    for row in model_runs
+                    if row.get("trigger_source") == "backfill" and row.get("signal_date") is not None
+                ),
+                None,
+            )
+            portfolio_run = next((row for row in portfolio_runs if row.get("model_id") == model["id"]), None)
+            ranking_signal_date = str(latest_ranking["signal_date"]) if latest_ranking else None
+            portfolio_end = str(portfolio_run["end_signal_date"]) if portfolio_run and portfolio_run.get("end_signal_date") else None
+            items.append(
+                {
+                    "model_id": model["id"],
+                    "model_key": model["key"],
+                    "model_name": model["name"],
+                    "workflow_base": model.get("workflow_base"),
+                    "latest_ranking_run_id": latest_ranking.get("id") if latest_ranking else None,
+                    "latest_ranking_signal_date": ranking_signal_date,
+                    "ranking_ready_for_trade_date": ranking_signal_date == trade_date,
+                    "portfolio_run_id": portfolio_run.get("id") if portfolio_run else None,
+                    "portfolio_run_name": portfolio_run.get("name") if portfolio_run else None,
+                    "portfolio_end_signal_date": portfolio_end,
+                    "portfolio_ready_for_trade_date": portfolio_end == expected_portfolio_end,
+                    "expected_portfolio_end_signal_date": expected_portfolio_end,
+                }
+            )
+        return {
+            "trade_date": trade_date,
+            "expected_portfolio_end_signal_date": expected_portfolio_end,
+            "models": items,
+        }
 
     def get_job(self, job_id: int) -> dict[str, Any]:
         with connect(self.settings.db_path) as conn:
@@ -669,19 +712,41 @@ class RankingBackendService:
             )
             step_id = int(cursor.lastrowid)
 
-        proc = subprocess.run(
+        child_env = os.environ.copy()
+        child_env.setdefault("PYTHONUNBUFFERED", "1")
+        proc = subprocess.Popen(
             command,
             cwd=str(self.settings.project_root),
             text=True,
-            capture_output=True,
-            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            env=child_env,
+            bufsize=1,
         )
-        combined_output = "\n".join(
-            part for part in [proc.stdout.strip(), proc.stderr.strip()] if part
-        ).strip()
+        assert proc.stdout is not None
+        lines: list[str] = []
+        for line in proc.stdout:
+            clean_line = line.rstrip("\n")
+            lines.append(clean_line)
+            with connect(self.settings.db_path) as conn:
+                conn.execute(
+                    """
+                    UPDATE job_steps
+                    SET log_output = COALESCE(log_output, '') ||
+                        CASE
+                          WHEN COALESCE(log_output, '') = '' THEN ''
+                          ELSE char(10)
+                        END ||
+                        ?
+                    WHERE id = ?
+                    """,
+                    (clean_line, step_id),
+                )
+        rc = proc.wait()
+        combined_output = "\n".join(lines).strip()
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        status = "succeeded" if proc.returncode == 0 else "failed"
-        error_text = None if proc.returncode == 0 else (combined_output or f"Step failed: {step_name}")
+        status = "succeeded" if rc == 0 else "failed"
+        error_text = None if rc == 0 else (combined_output or f"Step failed: {step_name}")
 
         with connect(self.settings.db_path) as conn:
             conn.execute(
@@ -705,7 +770,7 @@ class RankingBackendService:
                 """,
                 (f"[{step_name}]\n{combined_output}".strip(), job_id),
             )
-        if proc.returncode != 0:
+        if rc != 0:
             raise RuntimeError(error_text or f"Step failed: {step_name}")
 
     def _build_refresh_data_command(self, *, client_id: int, start_date: str) -> list[str]:

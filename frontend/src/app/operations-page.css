@@ -12,6 +12,15 @@
   align-items: baseline;
 }
 
+.panel-head button.secondary {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 255, 255, 0.72);
+  font: inherit;
+  cursor: pointer;
+}
+
 .eyebrow,
 .summary span,
 .field span,
@@ -32,6 +41,50 @@
 .grid {
   display: grid;
   gap: 20px;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.status-card {
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.6);
+  display: grid;
+  gap: 8px;
+}
+
+.status-title,
+.status-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.model-chip {
+  display: inline-block;
+  border: 1px solid rgba(12, 122, 90, 0.28);
+  border-radius: 999px;
+  padding: 2px 8px;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.ok {
+  color: var(--accent);
+}
+
+.bad {
+  color: var(--danger);
 }
 
 .ops-grid {
@@ -171,6 +224,11 @@ pre {
   padding: 10px 12px;
   background: rgba(247, 244, 238, 0.95);
   font: 12px/1.45 "SFMono-Regular", Consolas, monospace;
+}
+
+.live-log {
+  max-height: 320px;
+  overflow: auto;
 }
 
 .notice.error {

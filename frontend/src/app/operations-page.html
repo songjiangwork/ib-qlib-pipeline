@@ -21,6 +21,51 @@
     <div class="notice error">{{ state.jobActionError() }}</div>
   }
 
+  <section class="panel">
+    <div class="panel-head">
+      <h3>{{ i18n.t('todayStatus') }}</h3>
+      <button type="button" class="secondary" (click)="reloadSummary()">{{ i18n.t('refreshStatus') }}</button>
+    </div>
+    @if (state.operationsSummary(); as summary) {
+      <div class="summary-grid">
+        @for (item of operationsModels(); track item.model_id) {
+          <article class="status-card">
+            <div class="status-title">
+              <strong>{{ item.model_name }}</strong>
+              <span class="model-chip">{{ item.model_key }}</span>
+            </div>
+            <div class="status-row">
+              <span>{{ i18n.t('latestRanking') }}</span>
+              <strong>{{ item.latest_ranking_signal_date || 'N/A' }}</strong>
+            </div>
+            <div class="status-row">
+              <span>{{ i18n.t('rankingReady') }}</span>
+              <strong [class.ok]="item.ranking_ready_for_trade_date" [class.bad]="!item.ranking_ready_for_trade_date">
+                {{ item.ranking_ready_for_trade_date ? i18n.t('yes') : i18n.t('no') }}
+              </strong>
+            </div>
+            <div class="status-row">
+              <span>{{ i18n.t('portfolioRun') }}</span>
+              <strong>{{ item.portfolio_run_name || 'N/A' }}</strong>
+            </div>
+            <div class="status-row">
+              <span>{{ i18n.t('portfolioThrough') }}</span>
+              <strong>{{ item.portfolio_end_signal_date || 'N/A' }}</strong>
+            </div>
+            <div class="status-row">
+              <span>{{ i18n.t('portfolioReady') }}</span>
+              <strong [class.ok]="item.portfolio_ready_for_trade_date" [class.bad]="!item.portfolio_ready_for_trade_date">
+                {{ item.portfolio_ready_for_trade_date ? i18n.t('yes') : i18n.t('no') }}
+              </strong>
+            </div>
+          </article>
+        }
+      </div>
+    } @else {
+      <div class="empty">{{ i18n.t('selectTradeDateForSummary') }}</div>
+    }
+  </section>
+
   <div class="ops-grid">
     <section class="panel">
       <div class="panel-head">
@@ -147,7 +192,7 @@
               @if (step.log_output) {
                 <details>
                   <summary>{{ i18n.t('stepLog') }}</summary>
-                  <pre>{{ step.log_output }}</pre>
+                  <pre class="live-log">{{ step.log_output }}</pre>
                 </details>
               }
               @if (step.error_text) {
