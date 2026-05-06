@@ -75,6 +75,13 @@
         <span>{{ i18n.t('scheduleName') }}</span>
         <input type="text" [ngModel]="scheduleName()" (ngModelChange)="scheduleName.set($event)" />
       </label>
+      <label class="field">
+        <span>{{ i18n.t('scheduleType') }}</span>
+        <select [ngModel]="scheduleType()" (ngModelChange)="scheduleType.set($event)">
+          <option value="daily_close_pipeline">{{ i18n.t('dailyClosePipeline') }}</option>
+          <option value="ranking">{{ i18n.t('singleRankingRun') }}</option>
+        </select>
+      </label>
       <div class="inline-fields">
         <label class="field">
           <span>{{ i18n.t('hour') }}</span>
@@ -89,18 +96,29 @@
         <span>{{ i18n.t('clientId') }}</span>
         <input type="number" [ngModel]="scheduleClientId()" (ngModelChange)="scheduleClientId.set(+$event)" />
       </label>
-      <label class="field">
-        <span>{{ i18n.t('lookbackDays') }}</span>
-        <input type="number" min="1" max="90" [ngModel]="scheduleLookbackDays()" (ngModelChange)="scheduleLookbackDays.set(+$event)" />
-      </label>
-      <label class="field">
-        <span>{{ i18n.t('workflow') }}</span>
-        <select [ngModel]="scheduleWorkflowBase()" (ngModelChange)="scheduleWorkflowBase.set($event)">
-          @for (model of state.models(); track model.id) {
-            <option [ngValue]="model.workflow_base || ''">{{ model.name }} ({{ model.key }})</option>
-          }
-        </select>
-      </label>
+      @if (scheduleType() === 'ranking') {
+        <label class="field">
+          <span>{{ i18n.t('lookbackDays') }}</span>
+          <input type="number" min="1" max="90" [ngModel]="scheduleLookbackDays()" (ngModelChange)="scheduleLookbackDays.set(+$event)" />
+        </label>
+        <label class="field">
+          <span>{{ i18n.t('workflow') }}</span>
+          <select [ngModel]="scheduleWorkflowBase()" (ngModelChange)="scheduleWorkflowBase.set($event)">
+            @for (model of state.models(); track model.id) {
+              <option [ngValue]="model.workflow_base || ''">{{ model.name }} ({{ model.key }})</option>
+            }
+          </select>
+        </label>
+      } @else {
+        <label class="field">
+          <span>{{ i18n.t('refreshStartDate') }}</span>
+          <input type="date" [ngModel]="schedulePipelineStartDate()" (ngModelChange)="schedulePipelineStartDate.set($event)" />
+        </label>
+        <label class="check">
+          <input type="checkbox" [ngModel]="schedulePipelineIncludePortfolio()" (ngModelChange)="schedulePipelineIncludePortfolio.set(!!$event)" />
+          <span>{{ i18n.t('includePortfolioAppend') }}</span>
+        </label>
+      }
       <button type="button" class="primary" (click)="createSchedule()">{{ i18n.t('createSchedule') }}</button>
       <div class="schedule-list">
         @for (schedule of state.schedules(); track schedule.id) {
@@ -111,8 +129,13 @@
                 {{ schedule.enabled === 1 ? i18n.t('enabled') : i18n.t('disabled') }}
               </span>
             </div>
+            <span>{{ schedule.schedule_type === 'daily_close_pipeline' ? i18n.t('dailyClosePipeline') : i18n.t('singleRankingRun') }}</span>
             <span>{{ schedule.day_of_week }} {{ schedule.hour.toString().padStart(2, '0') }}:{{ schedule.minute.toString().padStart(2, '0') }}</span>
-            <span>{{ schedule.workflow_base }}</span>
+            @if (schedule.schedule_type === 'daily_close_pipeline') {
+              <span>{{ i18n.t('refreshStartDate') }}: {{ schedule.pipeline_start_date || 'N/A' }}</span>
+            } @else {
+              <span>{{ schedule.workflow_base }}</span>
+            }
             <div class="schedule-actions">
               <button type="button" class="secondary" (click)="toggleSchedule(schedule)">
                 {{ schedule.enabled === 1 ? i18n.t('disable') : i18n.t('enable') }}

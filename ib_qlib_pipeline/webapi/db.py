@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS models (
 CREATE TABLE IF NOT EXISTS schedules (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
+    schedule_type TEXT NOT NULL DEFAULT 'ranking',
     enabled INTEGER NOT NULL DEFAULT 1,
     timezone TEXT NOT NULL,
     day_of_week TEXT NOT NULL DEFAULT 'mon-fri',
@@ -31,6 +32,8 @@ CREATE TABLE IF NOT EXISTS schedules (
     client_id INTEGER NOT NULL DEFAULT 151,
     lookback_days INTEGER NOT NULL DEFAULT 7,
     workflow_base TEXT NOT NULL,
+    pipeline_start_date TEXT,
+    pipeline_include_portfolio INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     last_triggered_at TEXT,
@@ -185,6 +188,14 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
     if "model_id" not in runs_columns:
         conn.execute("ALTER TABLE runs ADD COLUMN model_id INTEGER REFERENCES models(id) ON DELETE SET NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_model_id ON runs(model_id, signal_date DESC)")
+
+    schedule_columns = _column_names(conn, "schedules")
+    if "schedule_type" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'ranking'")
+    if "pipeline_start_date" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN pipeline_start_date TEXT")
+    if "pipeline_include_portfolio" not in schedule_columns:
+        conn.execute("ALTER TABLE schedules ADD COLUMN pipeline_include_portfolio INTEGER NOT NULL DEFAULT 1")
 
 
 def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:

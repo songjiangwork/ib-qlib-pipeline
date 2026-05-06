@@ -24,6 +24,7 @@ export interface BackendConfig {
 export interface ScheduleItem {
   id: number;
   name: string;
+  schedule_type: 'ranking' | 'daily_close_pipeline';
   enabled: number;
   timezone: string;
   day_of_week: string;
@@ -32,6 +33,8 @@ export interface ScheduleItem {
   client_id: number;
   lookback_days: number;
   workflow_base: string;
+  pipeline_start_date?: string | null;
+  pipeline_include_portfolio: number;
   created_at: string;
   updated_at: string;
   last_triggered_at?: string | null;
@@ -503,6 +506,7 @@ export class FrontendStateService {
 
   async createSchedule(payload: {
     name: string;
+    schedule_type: 'ranking' | 'daily_close_pipeline';
     hour: number;
     minute: number;
     day_of_week: string;
@@ -510,6 +514,8 @@ export class FrontendStateService {
     client_id: number;
     lookback_days: number;
     workflow_base: string;
+    pipeline_start_date?: string | null;
+    pipeline_include_portfolio: boolean;
     enabled: boolean;
   }): Promise<void> {
     this.jobActionError.set(null);

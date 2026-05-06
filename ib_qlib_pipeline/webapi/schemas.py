@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class ScheduleCreate(BaseModel):
     name: str = Field(min_length=1, max_length=120)
+    schedule_type: Literal["ranking", "daily_close_pipeline"] = "daily_close_pipeline"
     hour: int = Field(ge=0, le=23)
     minute: int = Field(ge=0, le=59)
     day_of_week: str = Field(default="mon-fri")
@@ -14,11 +15,14 @@ class ScheduleCreate(BaseModel):
     client_id: int = Field(default=151, ge=0)
     lookback_days: int = Field(default=7, ge=1, le=90)
     workflow_base: str = Field(default="examples/workflow_us_lgb_2020_port.yaml")
+    pipeline_start_date: str | None = None
+    pipeline_include_portfolio: bool = True
     enabled: bool = True
 
 
 class ScheduleUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=120)
+    schedule_type: Literal["ranking", "daily_close_pipeline"] | None = None
     hour: int | None = Field(default=None, ge=0, le=23)
     minute: int | None = Field(default=None, ge=0, le=59)
     day_of_week: str | None = None
@@ -26,6 +30,8 @@ class ScheduleUpdate(BaseModel):
     client_id: int | None = Field(default=None, ge=0)
     lookback_days: int | None = Field(default=None, ge=1, le=90)
     workflow_base: str | None = None
+    pipeline_start_date: str | None = None
+    pipeline_include_portfolio: bool | None = None
     enabled: bool | None = None
 
 

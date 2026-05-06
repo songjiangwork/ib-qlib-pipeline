@@ -9,6 +9,7 @@ import subprocess
 import threading
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -54,16 +55,19 @@ class RankingBackendService:
 
     def create_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
+        schedule_type = str(payload.get("schedule_type") or "ranking")
         with connect(self.settings.db_path) as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO schedules (
-                    name, enabled, timezone, day_of_week, hour, minute,
-                    client_id, lookback_days, workflow_base, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    name, schedule_type, enabled, timezone, day_of_week, hour, minute,
+                    client_id, lookback_days, workflow_base, pipeline_start_date,
+                    pipeline_include_portfolio, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     payload["name"],
+                    schedule_type,
                     1 if payload["enabled"] else 0,
                     payload["timezone"],
                     payload["day_of_week"],
@@ -71,7 +75,9 @@ class RankingBackendService:
                     payload["minute"],
                     payload["client_id"],
                     payload["lookback_days"],
-                    payload["workflow_base"],
+                    payload.get("workflow_base") or self.settings.default_workflow_base,
+                    payload.get("pipeline_start_date"),
+                    1 if bool(payload.get("pipeline_include_portfolio", True)) else 0,
                     now,
                     now,
                 ),
@@ -87,6 +93,7 @@ class RankingBackendService:
             return self.get_schedule(schedule_id)
         allowed = {
             "name",
+            "schedule_type",
             "enabled",
             "timezone",
             "day_of_week",
@@ -95,6 +102,8 @@ class RankingBackendService:
             "client_id",
             "lookback_days",
             "workflow_base",
+            "pipeline_start_date",
+            "pipeline_include_portfolio",
         }
         assignments = []
         params: list[Any] = []
@@ -102,7 +111,10 @@ class RankingBackendService:
             if key not in allowed or value is None:
                 continue
             assignments.append(f"{key} = ?")
-            params.append(1 if key == "enabled" and value else 0 if key == "enabled" else value)
+            if key in {"enabled", "pipeline_include_portfolio"}:
+                params.append(1 if value else 0)
+            else:
+                params.append(value)
         if not assignments:
             return self.get_schedule(schedule_id)
         params.extend([dt.datetime.now(dt.timezone.utc).isoformat(), schedule_id])
@@ -247,12 +259,21 @@ class RankingBackendService:
             return self.trigger_append_portfolio_job(payload)
         if job_type == "daily_close_pipeline":
             return self.trigger_daily_close_pipeline_job(payload)
+        if job_type == "scheduled_daily_close_pipeline":
+            return self._start_job(
+                job_type=job_type,
+                title=str(job["title"]),
+                payload=payload,
+                target=self._execute_daily_close_pipeline_job,
+                schedule_id=int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None,
+            )
         if job_type in {"manual_ranking_run", "scheduled_ranking_run"}:
             return self._start_job(
                 job_type=job_type,
                 title=str(job["title"]),
                 payload=payload,
                 target=self._execute_ranking_run_job,
+                schedule_id=int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None,
             )
         raise RuntimeError(f"Retry not supported for job_type={job_type}")
 
@@ -403,6 +424,28 @@ class RankingBackendService:
 
     def _trigger_scheduled_run(self, schedule_id: int) -> None:
         schedule = self.get_schedule(schedule_id)
+        schedule_type = str(schedule.get("schedule_type") or "ranking")
+        if schedule_type == "daily_close_pipeline":
+            now_local = dt.datetime.now(ZoneInfo(str(schedule["timezone"])))
+            trade_date = now_local.date().isoformat()
+            pipeline_start_date = schedule.get("pipeline_start_date")
+            if not pipeline_start_date:
+                pipeline_start_date = (now_local.date() - dt.timedelta(days=int(schedule["lookback_days"]))).isoformat()
+            self._start_job(
+                job_type="scheduled_daily_close_pipeline",
+                title=f"Scheduled daily close pipeline #{schedule_id} ({trade_date})",
+                payload={
+                    "schedule_id": schedule_id,
+                    "trade_date": trade_date,
+                    "client_id": int(schedule["client_id"]),
+                    "start_date": str(pipeline_start_date),
+                    "include_portfolio": bool(schedule.get("pipeline_include_portfolio")),
+                },
+                target=self._execute_daily_close_pipeline_job,
+                schedule_id=schedule_id,
+            )
+            return
+
         self._start_job(
             job_type="scheduled_ranking_run",
             title=f"Scheduled ranking run #{schedule_id} ({schedule['workflow_base']})",
@@ -414,6 +457,7 @@ class RankingBackendService:
                 "workflow_base": str(schedule["workflow_base"]),
             },
             target=self._execute_ranking_run_job,
+            schedule_id=schedule_id,
         )
 
     def _start_run(
@@ -489,6 +533,7 @@ class RankingBackendService:
         title: str,
         payload: dict[str, Any],
         target: Any,
+        schedule_id: int | None = None,
     ) -> dict[str, Any]:
         if not self._run_lock.acquire(blocking=False):
             raise BusyError("Another backend run or job is already in progress")
@@ -510,9 +555,18 @@ class RankingBackendService:
                     ),
                 )
                 job_id = int(cursor.lastrowid)
+                if schedule_id is not None:
+                    conn.execute(
+                        """
+                        UPDATE schedules
+                        SET last_triggered_at = ?, last_run_status = 'queued', updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (now, now, schedule_id),
+                    )
             thread = threading.Thread(
                 target=self._execute_job_thread,
-                args=(job_id, target, payload),
+                args=(job_id, target, payload, schedule_id),
                 daemon=True,
             )
             thread.start()
@@ -592,7 +646,7 @@ class RankingBackendService:
                 (lgb_model_id,),
             )
 
-    def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any]) -> None:
+    def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any], schedule_id: int | None) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
             with connect(self.settings.db_path) as conn:
@@ -600,6 +654,11 @@ class RankingBackendService:
                     "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
                     (started_at, job_id),
                 )
+                if schedule_id is not None:
+                    conn.execute(
+                        "UPDATE schedules SET last_run_status = 'running', updated_at = ? WHERE id = ?",
+                        (started_at, schedule_id),
+                    )
             target(job_id, payload)
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
             with connect(self.settings.db_path) as conn:
@@ -607,6 +666,11 @@ class RankingBackendService:
                     "UPDATE jobs SET status = 'succeeded', finished_at = ?, error_text = NULL WHERE id = ?",
                     (finished_at, job_id),
                 )
+                if schedule_id is not None:
+                    conn.execute(
+                        "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
+                        (finished_at, schedule_id),
+                    )
         except Exception as exc:  # noqa: BLE001
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
             with connect(self.settings.db_path) as conn:
@@ -614,6 +678,11 @@ class RankingBackendService:
                     "UPDATE jobs SET status = 'failed', finished_at = ?, error_text = ? WHERE id = ?",
                     (finished_at, str(exc), job_id),
                 )
+                if schedule_id is not None:
+                    conn.execute(
+                        "UPDATE schedules SET last_run_status = 'failed', updated_at = ? WHERE id = ?",
+                        (finished_at, schedule_id),
+                    )
         finally:
             self._run_lock.release()
 

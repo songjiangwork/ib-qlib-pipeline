@@ -44,10 +44,13 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected readonly appendPortfolioRunId = signal<number | null>(null);
   protected readonly appendEndDate = signal(daysAgoIso(1));
   protected readonly scheduleName = signal('Daily Close');
+  protected readonly scheduleType = signal<'ranking' | 'daily_close_pipeline'>('daily_close_pipeline');
   protected readonly scheduleHour = signal(16);
   protected readonly scheduleMinute = signal(10);
   protected readonly scheduleClientId = signal(151);
   protected readonly scheduleLookbackDays = signal(7);
+  protected readonly schedulePipelineStartDate = signal(daysAgoIso(7));
+  protected readonly schedulePipelineIncludePortfolio = signal(true);
   protected readonly scheduleWorkflowBase = signal('examples/workflow_us_lgb_2020_port.yaml');
   protected readonly scheduleDayOfWeek = signal('mon-fri');
   protected readonly scheduleTimezone = signal('America/Edmonton');
@@ -151,6 +154,7 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected async createSchedule(): Promise<void> {
     await this.state.createSchedule({
       name: this.scheduleName(),
+      schedule_type: this.scheduleType(),
       hour: this.scheduleHour(),
       minute: this.scheduleMinute(),
       day_of_week: this.scheduleDayOfWeek(),
@@ -158,6 +162,8 @@ export class OperationsPage implements OnInit, OnDestroy {
       client_id: this.scheduleClientId(),
       lookback_days: this.scheduleLookbackDays(),
       workflow_base: this.scheduleWorkflowBase(),
+      pipeline_start_date: this.schedulePipelineStartDate(),
+      pipeline_include_portfolio: this.schedulePipelineIncludePortfolio(),
       enabled: true,
     });
   }
