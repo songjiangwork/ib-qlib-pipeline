@@ -235,6 +235,27 @@ class RankingBackendService:
         item["steps"] = rows_to_dicts(steps)
         return item
 
+    def retry_job(self, job_id: int) -> dict[str, Any]:
+        job = self.get_job(job_id)
+        payload = json.loads(job.get("payload_json") or "{}")
+        job_type = str(job["job_type"])
+        if job_type == "refresh_data":
+            return self.trigger_data_refresh_job(payload)
+        if job_type == "backfill_ranking":
+            return self.trigger_backfill_job(payload)
+        if job_type == "append_portfolio":
+            return self.trigger_append_portfolio_job(payload)
+        if job_type == "daily_close_pipeline":
+            return self.trigger_daily_close_pipeline_job(payload)
+        if job_type in {"manual_ranking_run", "scheduled_ranking_run"}:
+            return self._start_job(
+                job_type=job_type,
+                title=str(job["title"]),
+                payload=payload,
+                target=self._execute_ranking_run_job,
+            )
+        raise RuntimeError(f"Retry not supported for job_type={job_type}")
+
     def list_ranking_dates(
         self,
         *,
@@ -312,12 +333,17 @@ class RankingBackendService:
         return rows_to_dicts(rows)
 
     def trigger_manual_run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_run(
-            schedule_id=None,
-            trigger_source="manual",
-            client_id=int(payload["client_id"]),
-            lookback_days=int(payload["lookback_days"]),
-            workflow_base=str(payload["workflow_base"]),
+        return self._start_job(
+            job_type="manual_ranking_run",
+            title=f"Manual ranking run ({payload['workflow_base']})",
+            payload={
+                "schedule_id": None,
+                "trigger_source": "manual",
+                "client_id": int(payload["client_id"]),
+                "lookback_days": int(payload["lookback_days"]),
+                "workflow_base": str(payload["workflow_base"]),
+            },
+            target=self._execute_ranking_run_job,
         )
 
     def trigger_data_refresh_job(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -377,12 +403,17 @@ class RankingBackendService:
 
     def _trigger_scheduled_run(self, schedule_id: int) -> None:
         schedule = self.get_schedule(schedule_id)
-        self._start_run(
-            schedule_id=schedule_id,
-            trigger_source="schedule",
-            client_id=int(schedule["client_id"]),
-            lookback_days=int(schedule["lookback_days"]),
-            workflow_base=str(schedule["workflow_base"]),
+        self._start_job(
+            job_type="scheduled_ranking_run",
+            title=f"Scheduled ranking run #{schedule_id} ({schedule['workflow_base']})",
+            payload={
+                "schedule_id": schedule_id,
+                "trigger_source": "schedule",
+                "client_id": int(schedule["client_id"]),
+                "lookback_days": int(schedule["lookback_days"]),
+                "workflow_base": str(schedule["workflow_base"]),
+            },
+            target=self._execute_ranking_run_job,
         )
 
     def _start_run(
@@ -490,6 +521,61 @@ class RankingBackendService:
             self._run_lock.release()
             raise
 
+    def _create_run_record(
+        self,
+        *,
+        schedule_id: int | None,
+        trigger_source: str,
+        client_id: int,
+        lookback_days: int,
+        workflow_base: str,
+    ) -> int:
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        model_id = resolve_or_create_model_for_workflow(
+            self.settings.db_path,
+            self.settings.project_root,
+            workflow_base,
+        )
+        command = [
+            str(self.settings.run_script_path),
+            "--client-id",
+            str(client_id),
+            "--lookback-days",
+            str(lookback_days),
+            "--workflow-base",
+            workflow_base,
+        ]
+        with connect(self.settings.db_path) as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO runs (
+                    schedule_id, model_id, trigger_source, status, client_id, lookback_days,
+                    workflow_base, command, created_at
+                ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
+                """,
+                (
+                    schedule_id,
+                    model_id,
+                    trigger_source,
+                    client_id,
+                    lookback_days,
+                    workflow_base,
+                    " ".join(command),
+                    now,
+                ),
+            )
+            run_id = int(cursor.lastrowid)
+            if schedule_id is not None:
+                conn.execute(
+                    """
+                    UPDATE schedules
+                    SET last_triggered_at = ?, last_run_id = ?, last_run_status = 'queued', updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (now, run_id, now, schedule_id),
+                )
+        return run_id
+
     def _backfill_legacy_run_models(self) -> None:
         lgb_model_id = resolve_or_create_model_for_workflow(
             self.settings.db_path,
@@ -530,6 +616,31 @@ class RankingBackendService:
                 )
         finally:
             self._run_lock.release()
+
+    def _execute_ranking_run_job(self, job_id: int, payload: dict[str, Any]) -> None:
+        schedule_id = int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None
+        trigger_source = str(payload["trigger_source"])
+        client_id = int(payload["client_id"])
+        lookback_days = int(payload["lookback_days"])
+        workflow_base = str(payload["workflow_base"])
+        run_id = self._create_run_record(
+            schedule_id=schedule_id,
+            trigger_source=trigger_source,
+            client_id=client_id,
+            lookback_days=lookback_days,
+            workflow_base=workflow_base,
+        )
+        command = [
+            str(self.settings.run_script_path),
+            "--client-id",
+            str(client_id),
+            "--lookback-days",
+            str(lookback_days),
+            "--workflow-base",
+            workflow_base,
+        ]
+        combined_output = self._run_job_step(job_id, "ranking_run", command)
+        self._finalize_run_from_output(run_id, schedule_id, combined_output)
 
     def _execute_run(self, run_id: int, schedule_id: int | None, command: list[str]) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -692,7 +803,7 @@ class RankingBackendService:
                 ),
             )
 
-    def _run_job_step(self, job_id: int, step_name: str, command: list[str]) -> None:
+    def _run_job_step(self, job_id: int, step_name: str, command: list[str]) -> str:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         command_text = " ".join(command)
         with connect(self.settings.db_path) as conn:
@@ -772,6 +883,64 @@ class RankingBackendService:
             )
         if rc != 0:
             raise RuntimeError(error_text or f"Step failed: {step_name}")
+        return combined_output
+
+    def _finalize_run_from_output(self, run_id: int, schedule_id: int | None, combined_output: str) -> None:
+        artifacts = self._parse_run_output(combined_output)
+        ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
+        finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        recommendations = ranking_df_to_rows(ranking_df)
+        with connect(self.settings.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE runs
+                SET status = 'succeeded',
+                    finished_at = ?,
+                    signal_date = ?,
+                    ranking_csv_path = ?,
+                    html_report_path = ?,
+                    experiment_id = ?,
+                    recorder_id = ?,
+                    row_count = ?,
+                    log_output = ?,
+                    error_text = NULL
+                WHERE id = ?
+                """,
+                (
+                    finished_at,
+                    artifacts["signal_date"],
+                    artifacts["ranking_csv_path"],
+                    artifacts["html_report_path"],
+                    artifacts["experiment_id"],
+                    artifacts["recorder_id"],
+                    len(recommendations),
+                    combined_output,
+                    run_id,
+                ),
+            )
+            conn.executemany(
+                """
+                INSERT INTO recommendations (run_id, rank, symbol, score, percentile, entry_price, signal_date)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                [
+                    (
+                        run_id,
+                        int(row["rank"]),
+                        str(row["symbol"]),
+                        float(row["score"]),
+                        float(row["percentile"]) if row["percentile"] is not None else None,
+                        float(row["entry_price"]) if row["entry_price"] is not None else None,
+                        str(row["signal_date"]),
+                    )
+                    for row in recommendations
+                ],
+            )
+            if schedule_id is not None:
+                conn.execute(
+                    "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
+                    (finished_at, schedule_id),
+                )
 
     def _build_refresh_data_command(self, *, client_id: int, start_date: str) -> list[str]:
         python_bin = self.settings.project_root / ".venv" / "bin" / "python"

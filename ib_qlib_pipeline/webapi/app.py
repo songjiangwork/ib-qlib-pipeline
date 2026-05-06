@@ -88,6 +88,15 @@ def create_app() -> FastAPI:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.post("/api/jobs/{job_id}/retry")
+    def retry_job(job_id: int) -> dict[str, Any]:
+        try:
+            return get_service().retry_job(job_id)
+        except BusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/api/jobs/refresh-data")
     def create_refresh_data_job(payload: DataRefreshJobRequest) -> dict[str, Any]:
         try:

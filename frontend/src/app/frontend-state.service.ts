@@ -3,6 +3,14 @@ import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { FrontendI18nService } from './frontend-i18n.service';
 
+function localDateIso(): string {
+  const value = new Date();
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
 
 export interface BackendConfig {
@@ -294,7 +302,7 @@ export class FrontendStateService {
         this.models.set(models ?? []);
       }
       await this.loadJobs();
-      await this.loadOperationsSummary(new Date().toISOString().slice(0, 10));
+      await this.loadOperationsSummary(localDateIso());
     } catch {
       this.jobActionError.set(this.i18n.t('failedJobs'));
     }
@@ -362,7 +370,7 @@ export class FrontendStateService {
         }
       }
       await this.loadRankingDates(true);
-      const summaryTradeDate = this.operationsSummary()?.trade_date ?? new Date().toISOString().slice(0, 10);
+      const summaryTradeDate = this.operationsSummary()?.trade_date ?? localDateIso();
       await this.loadOperationsSummary(summaryTradeDate);
     } catch {
       this.jobActionError.set(this.i18n.t('failedJobsRefresh'));
@@ -447,6 +455,19 @@ export class FrontendStateService {
       }
     } catch (error: any) {
       this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
+    }
+  }
+
+  async retryJob(jobId: number): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(this.http.post<JobSummary>(`/api/jobs/${jobId}/retry`, {}));
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedRetryJob'));
     }
   }
 

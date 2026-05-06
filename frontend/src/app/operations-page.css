@@ -211,6 +211,12 @@
   background: rgba(255, 255, 255, 0.58);
 }
 
+.step.active-step {
+  border-color: rgba(12, 122, 90, 0.4);
+  box-shadow: inset 0 0 0 1px rgba(12, 122, 90, 0.12);
+  background: rgba(12, 122, 90, 0.05);
+}
+
 .steps {
   display: grid;
   gap: 12px;

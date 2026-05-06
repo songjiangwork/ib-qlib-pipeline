@@ -170,6 +170,9 @@
     <section class="panel">
       <div class="panel-head">
         <h3>{{ i18n.t('jobDetail') }}</h3>
+        @if (state.selectedJobDetail()?.status === 'failed') {
+          <button type="button" class="secondary" (click)="retrySelectedJob()">{{ i18n.t('retryJob') }}</button>
+        }
       </div>
       @if (state.selectedJobDetail(); as job) {
         <div class="job-meta">
@@ -179,7 +182,7 @@
         </div>
         <div class="steps">
           @for (step of job.steps; track step.id) {
-            <article class="step">
+            <article class="step" [class.active-step]="isActiveStep(step.status, step.step_order)">
               <div class="step-head">
                 <strong>{{ step.step_order }}. {{ step.step_name }}</strong>
                 <span class="status" [class.running]="step.status === 'running' || step.status === 'queued'" [class.failed]="step.status === 'failed'">
@@ -192,7 +195,7 @@
               @if (step.log_output) {
                 <details>
                   <summary>{{ i18n.t('stepLog') }}</summary>
-                  <pre class="live-log">{{ step.log_output }}</pre>
+                  <pre #liveLog class="live-log">{{ step.log_output }}</pre>
                 </details>
               }
               @if (step.error_text) {

@@ -1,18 +1,25 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnDestroy, OnInit, computed, inject, signal } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnDestroy, OnInit, QueryList, ViewChildren, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { FrontendI18nService } from './frontend-i18n.service';
 import { FrontendStateService } from './frontend-state.service';
 
 function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
+  const value = new Date();
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 function daysAgoIso(days: number): string {
   const value = new Date();
   value.setDate(value.getDate() - days);
-  return value.toISOString().slice(0, 10);
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 @Component({
@@ -37,6 +44,7 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected readonly appendPortfolioRunId = signal<number | null>(null);
   protected readonly appendEndDate = signal(daysAgoIso(1));
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  @ViewChildren('liveLog') private liveLogs!: QueryList<ElementRef<HTMLElement>>;
 
   protected readonly runningJobs = computed(() =>
     this.state.jobs().filter((job) => job.status === 'queued' || job.status === 'running'),
@@ -59,6 +67,14 @@ export class OperationsPage implements OnInit, OnDestroy {
   ngOnDestroy(): void {
     if (this.pollTimer !== null) {
       clearInterval(this.pollTimer);
+    }
+  }
+
+  ngAfterViewChecked(): void {
+    if (this.state.selectedJobDetail()?.status === 'running' || this.state.selectedJobDetail()?.status === 'queued') {
+      for (const ref of this.liveLogs.toArray()) {
+        ref.nativeElement.scrollTop = ref.nativeElement.scrollHeight;
+      }
     }
   }
 
@@ -99,5 +115,25 @@ export class OperationsPage implements OnInit, OnDestroy {
 
   protected async reloadSummary(): Promise<void> {
     await this.state.loadOperationsSummary(this.pipelineTradeDate());
+  }
+
+  protected async retrySelectedJob(): Promise<void> {
+    const jobId = this.state.selectedJobId();
+    if (jobId === null) {
+      return;
+    }
+    await this.state.retryJob(jobId);
+  }
+
+  protected isActiveStep(stepStatus: string, stepOrder: number): boolean {
+    if (stepStatus === 'running' || stepStatus === 'queued') {
+      return true;
+    }
+    const steps = this.state.selectedJobDetail()?.steps ?? [];
+    if (!steps.length) {
+      return false;
+    }
+    const maxOrder = Math.max(...steps.map((step) => step.step_order));
+    return stepOrder === maxOrder && this.state.selectedJobDetail()?.status === 'succeeded';
   }
 }
