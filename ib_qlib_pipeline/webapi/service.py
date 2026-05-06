@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import re
 import sqlite3
 import subprocess
@@ -13,9 +14,11 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import connect, init_db, rows_to_dicts
-from .model_store import ensure_default_models, resolve_or_create_model_for_workflow
+from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
+from .portfolio_store import list_portfolio_runs
 from .run_store import ranking_df_to_rows
 from .settings import Settings
+from ..ranking.ranking_loader import read_available_trading_days
 
 
 class BusyError(RuntimeError):
@@ -158,6 +161,37 @@ class RankingBackendService:
             rows = conn.execute(query, tuple(params)).fetchall()
         return rows_to_dicts(rows)
 
+    def list_jobs(self, limit: int = 30) -> list[dict[str, Any]]:
+        with connect(self.settings.db_path) as conn:
+            rows = conn.execute(
+                """
+                SELECT *
+                FROM jobs
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return rows_to_dicts(rows)
+
+    def get_job(self, job_id: int) -> dict[str, Any]:
+        with connect(self.settings.db_path) as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            if row is None:
+                raise NotFoundError(f"Job {job_id} not found")
+            steps = conn.execute(
+                """
+                SELECT *
+                FROM job_steps
+                WHERE job_id = ?
+                ORDER BY step_order, id
+                """,
+                (job_id,),
+            ).fetchall()
+        item = dict(row)
+        item["steps"] = rows_to_dicts(steps)
+        return item
+
     def list_ranking_dates(
         self,
         *,
@@ -241,6 +275,41 @@ class RankingBackendService:
             client_id=int(payload["client_id"]),
             lookback_days=int(payload["lookback_days"]),
             workflow_base=str(payload["workflow_base"]),
+        )
+
+    def trigger_data_refresh_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_job(
+            job_type="refresh_data",
+            title=f"Refresh market data from {payload['start_date']}",
+            payload=payload,
+            target=self._execute_refresh_data_job,
+        )
+
+    def trigger_backfill_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        model = get_model(self.settings.db_path, int(payload["model_id"]))
+        if model is None:
+            raise NotFoundError(f"Model {payload['model_id']} not found")
+        return self._start_job(
+            job_type="backfill_ranking",
+            title=f"Backfill {model['name']} ranking for {payload['signal_date']}",
+            payload=payload,
+            target=self._execute_backfill_job,
+        )
+
+    def trigger_append_portfolio_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_job(
+            job_type="append_portfolio",
+            title=f"Append portfolio run #{payload['portfolio_run_id']} through {payload['end_date']}",
+            payload=payload,
+            target=self._execute_append_portfolio_job,
+        )
+
+    def trigger_daily_close_pipeline_job(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return self._start_job(
+            job_type="daily_close_pipeline",
+            title=f"Daily close pipeline for {payload['trade_date']}",
+            payload=payload,
+            target=self._execute_daily_close_pipeline_job,
         )
 
     def reload_schedule_jobs(self) -> None:
@@ -339,6 +408,45 @@ class RankingBackendService:
             self._run_lock.release()
             raise
 
+    def _start_job(
+        self,
+        *,
+        job_type: str,
+        title: str,
+        payload: dict[str, Any],
+        target: Any,
+    ) -> dict[str, Any]:
+        if not self._run_lock.acquire(blocking=False):
+            raise BusyError("Another backend run or job is already in progress")
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        try:
+            with connect(self.settings.db_path) as conn:
+                cursor = conn.execute(
+                    """
+                    INSERT INTO jobs (
+                        job_type, title, status, payload_json, created_at, requested_by
+                    ) VALUES (?, ?, 'queued', ?, ?, ?)
+                    """,
+                    (
+                        job_type,
+                        title,
+                        json.dumps(payload, ensure_ascii=True, sort_keys=True),
+                        now,
+                        "web",
+                    ),
+                )
+                job_id = int(cursor.lastrowid)
+            thread = threading.Thread(
+                target=self._execute_job_thread,
+                args=(job_id, target, payload),
+                daemon=True,
+            )
+            thread.start()
+            return self.get_job(job_id)
+        except Exception:
+            self._run_lock.release()
+            raise
+
     def _backfill_legacy_run_models(self) -> None:
         lgb_model_id = resolve_or_create_model_for_workflow(
             self.settings.db_path,
@@ -354,6 +462,31 @@ class RankingBackendService:
                 """,
                 (lgb_model_id,),
             )
+
+    def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any]) -> None:
+        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        try:
+            with connect(self.settings.db_path) as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
+                    (started_at, job_id),
+                )
+            target(job_id, payload)
+            finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            with connect(self.settings.db_path) as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = 'succeeded', finished_at = ?, error_text = NULL WHERE id = ?",
+                    (finished_at, job_id),
+                )
+        except Exception as exc:  # noqa: BLE001
+            finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            with connect(self.settings.db_path) as conn:
+                conn.execute(
+                    "UPDATE jobs SET status = 'failed', finished_at = ?, error_text = ? WHERE id = ?",
+                    (finished_at, str(exc), job_id),
+                )
+        finally:
+            self._run_lock.release()
 
     def _execute_run(self, run_id: int, schedule_id: int | None, command: list[str]) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -444,6 +577,214 @@ class RankingBackendService:
             self._mark_run_failed(run_id, schedule_id, str(exc))
         finally:
             self._run_lock.release()
+
+    def _execute_refresh_data_job(self, job_id: int, payload: dict[str, Any]) -> None:
+        command = self._build_refresh_data_command(
+            client_id=int(payload["client_id"]),
+            start_date=str(payload["start_date"]),
+        )
+        self._run_job_step(job_id, "refresh_data", command)
+
+    def _execute_backfill_job(self, job_id: int, payload: dict[str, Any]) -> None:
+        model = get_model(self.settings.db_path, int(payload["model_id"]))
+        if model is None:
+            raise NotFoundError(f"Model {payload['model_id']} not found")
+        signal_date = str(payload["signal_date"])
+        command = self._build_backfill_command(
+            signal_date=signal_date,
+            workflow_base=str(model["workflow_base"]),
+            model_id=int(model["id"]),
+            client_id=int(payload["client_id"]),
+        )
+        self._run_job_step(job_id, f"backfill_{model['key']}", command)
+
+    def _execute_append_portfolio_job(self, job_id: int, payload: dict[str, Any]) -> None:
+        command = self._build_append_portfolio_command(
+            portfolio_run_id=int(payload["portfolio_run_id"]),
+            model_id=int(payload["model_id"]) if payload.get("model_id") is not None else None,
+            end_date=str(payload["end_date"]),
+        )
+        self._run_job_step(job_id, f"append_portfolio_{payload['portfolio_run_id']}", command)
+
+    def _execute_daily_close_pipeline_job(self, job_id: int, payload: dict[str, Any]) -> None:
+        trade_date = dt.date.fromisoformat(str(payload["trade_date"]))
+        client_id = int(payload["client_id"])
+        start_date = str(payload["start_date"])
+        include_portfolio = bool(payload.get("include_portfolio", True))
+
+        self._run_job_step(
+            job_id,
+            "refresh_data",
+            self._build_refresh_data_command(client_id=client_id, start_date=start_date),
+        )
+
+        models = [model for model in list_models(self.settings.db_path) if model.get("workflow_base")]
+        for model in models:
+            self._run_job_step(
+                job_id,
+                f"backfill_{model['key']}",
+                self._build_backfill_command(
+                    signal_date=trade_date.isoformat(),
+                    workflow_base=str(model["workflow_base"]),
+                    model_id=int(model["id"]),
+                    client_id=client_id,
+                ),
+            )
+
+        if not include_portfolio:
+            return
+
+        append_end_date = self._previous_trading_day(trade_date).isoformat()
+        for model in models:
+            portfolio_run = self._latest_portfolio_run_for_model(int(model["id"]))
+            if portfolio_run is None:
+                raise RuntimeError(f"No portfolio run found for model_id={model['id']}")
+            self._run_job_step(
+                job_id,
+                f"append_{model['key']}_portfolio",
+                self._build_append_portfolio_command(
+                    portfolio_run_id=int(portfolio_run["id"]),
+                    model_id=int(model["id"]),
+                    end_date=append_end_date,
+                ),
+            )
+
+    def _run_job_step(self, job_id: int, step_name: str, command: list[str]) -> None:
+        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        command_text = " ".join(command)
+        with connect(self.settings.db_path) as conn:
+            step_order = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(step_order), 0) + 1 FROM job_steps WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()[0]
+            )
+            cursor = conn.execute(
+                """
+                INSERT INTO job_steps (
+                    job_id, step_order, step_name, status, command, started_at
+                ) VALUES (?, ?, ?, 'running', ?, ?)
+                """,
+                (job_id, step_order, step_name, command_text, started_at),
+            )
+            step_id = int(cursor.lastrowid)
+
+        proc = subprocess.run(
+            command,
+            cwd=str(self.settings.project_root),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        combined_output = "\n".join(
+            part for part in [proc.stdout.strip(), proc.stderr.strip()] if part
+        ).strip()
+        finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        status = "succeeded" if proc.returncode == 0 else "failed"
+        error_text = None if proc.returncode == 0 else (combined_output or f"Step failed: {step_name}")
+
+        with connect(self.settings.db_path) as conn:
+            conn.execute(
+                """
+                UPDATE job_steps
+                SET status = ?, finished_at = ?, log_output = ?, error_text = ?
+                WHERE id = ?
+                """,
+                (status, finished_at, combined_output, error_text, step_id),
+            )
+            conn.execute(
+                """
+                UPDATE jobs
+                SET log_output = COALESCE(log_output, '') ||
+                    CASE
+                      WHEN COALESCE(log_output, '') = '' THEN ''
+                      ELSE char(10) || char(10)
+                    END ||
+                    ?
+                WHERE id = ?
+                """,
+                (f"[{step_name}]\n{combined_output}".strip(), job_id),
+            )
+        if proc.returncode != 0:
+            raise RuntimeError(error_text or f"Step failed: {step_name}")
+
+    def _build_refresh_data_command(self, *, client_id: int, start_date: str) -> list[str]:
+        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
+        return [
+            str(python_bin),
+            "run.py",
+            "--config",
+            "config.yaml",
+            "--client-id",
+            str(client_id),
+            "--start-date",
+            start_date,
+            "--bar-size",
+            "1 day",
+            "--no-news",
+            "--dump-bin",
+        ]
+
+    def _build_backfill_command(
+        self,
+        *,
+        signal_date: str,
+        workflow_base: str,
+        model_id: int,
+        client_id: int,
+    ) -> list[str]:
+        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
+        return [
+            str(python_bin),
+            "backfill_rankings.py",
+            "--start-date",
+            signal_date,
+            "--end-date",
+            signal_date,
+            "--workflow-base",
+            workflow_base,
+            "--model-id",
+            str(model_id),
+            "--client-id",
+            str(client_id),
+            "--html-mode",
+            "cached",
+            "--skip-existing-db",
+            "--skip-existing-files",
+        ]
+
+    def _build_append_portfolio_command(
+        self,
+        *,
+        portfolio_run_id: int,
+        model_id: int | None,
+        end_date: str,
+    ) -> list[str]:
+        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
+        command = [
+            str(python_bin),
+            "simulate_portfolio.py",
+            "--append-run-id",
+            str(portfolio_run_id),
+            "--end-date",
+            end_date,
+        ]
+        if model_id is not None:
+            command.extend(["--model-id", str(model_id)])
+        return command
+
+    def _previous_trading_day(self, trade_date: dt.date) -> dt.date:
+        trading_days = read_available_trading_days(self.settings.project_root)
+        prior_days = [day for day in trading_days if day < trade_date]
+        if not prior_days:
+            raise RuntimeError(f"No prior trading day found before {trade_date.isoformat()}")
+        return prior_days[-1]
+
+    def _latest_portfolio_run_for_model(self, model_id: int) -> dict[str, Any] | None:
+        for row in list_portfolio_runs(self.settings.db_path):
+            if row.get("model_id") == model_id:
+                return row
+        return None
 
     def _mark_run_failed(self, run_id: int, schedule_id: int | None, error_text: str) -> None:
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()

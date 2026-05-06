@@ -39,3 +39,27 @@ class RunQuery(BaseModel):
     limit: int = Field(default=50, ge=1, le=500)
     status: Literal["queued", "running", "succeeded", "failed"] | None = None
     signal_date: str | None = None
+
+
+class DataRefreshJobRequest(BaseModel):
+    client_id: int = Field(default=151, ge=0)
+    start_date: str
+
+
+class RankingBackfillJobRequest(BaseModel):
+    signal_date: str
+    model_id: int = Field(ge=1)
+    client_id: int = Field(default=151, ge=0)
+
+
+class PortfolioAppendJobRequest(BaseModel):
+    portfolio_run_id: int = Field(ge=1)
+    model_id: int | None = Field(default=None, ge=1)
+    end_date: str
+
+
+class DailyClosePipelineJobRequest(BaseModel):
+    trade_date: str
+    client_id: int = Field(default=151, ge=0)
+    start_date: str
+    include_portfolio: bool = True

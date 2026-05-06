@@ -13,6 +13,44 @@ export interface BackendConfig {
   run_script_path: string;
 }
 
+export interface ModelRef {
+  id: number;
+  key: string;
+  name: string;
+  model_class: string;
+  workflow_base?: string | null;
+}
+
+export interface JobSummary {
+  id: number;
+  job_type: string;
+  title: string;
+  status: RunStatus;
+  created_at: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  error_text?: string | null;
+}
+
+export interface JobStep {
+  id: number;
+  job_id: number;
+  step_order: number;
+  step_name: string;
+  status: RunStatus;
+  command?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  log_output?: string | null;
+  error_text?: string | null;
+}
+
+export interface JobDetail extends JobSummary {
+  payload_json?: string | null;
+  log_output?: string | null;
+  steps: JobStep[];
+}
+
 export interface RunSummary {
   id: number;
   trigger_source: string;
@@ -158,6 +196,7 @@ export class FrontendStateService {
   readonly rankingDateFilter = signal('');
   readonly symbolFilter = signal('');
   readonly backendConfig = signal<BackendConfig | null>(null);
+  readonly models = signal<ModelRef[]>([]);
   readonly recentRuns = signal<RunSummary[]>([]);
   readonly rankingDates = signal<RankingDateItem[]>([]);
   readonly rankingDatesTotal = signal(0);
@@ -174,6 +213,11 @@ export class FrontendStateService {
   readonly selectedSymbolLifecycle = signal<PortfolioSymbolLifecycle | null>(null);
   readonly selectedSymbolPriceBars = signal<PriceBar[]>([]);
   readonly selectedPriceInterval = signal<'1d'>('1d');
+  readonly jobs = signal<JobSummary[]>([]);
+  readonly selectedJobId = signal<number | null>(null);
+  readonly selectedJobDetail = signal<JobDetail | null>(null);
+  readonly jobsLoading = signal(false);
+  readonly jobActionError = signal<string | null>(null);
   readonly loadError = signal<string | null>(null);
   readonly detailError = signal<string | null>(null);
   readonly isLoading = signal(false);
@@ -195,15 +239,17 @@ export class FrontendStateService {
     this.isLoading.set(true);
     this.loadError.set(null);
     try {
-      const [config, runs, portfolioRuns] = await Promise.all([
+      const [config, runs, portfolioRuns, models] = await Promise.all([
         firstValueFrom(this.http.get<BackendConfig>('/api/config')),
         firstValueFrom(this.http.get<RunSummary[]>('/api/runs?limit=500')),
         firstValueFrom(this.http.get<PortfolioRunSummary[]>('/api/portfolio-runs')),
+        firstValueFrom(this.http.get<ModelRef[]>('/api/models')),
       ]);
 
       this.backendConfig.set(config ?? null);
       this.recentRuns.set(runs ?? []);
       this.portfolioRuns.set(portfolioRuns ?? []);
+      this.models.set(models ?? []);
       await this.loadRankingDates(true);
 
       if (!this.selectedRankingRunId() && runs && runs.length > 0) {
@@ -216,6 +262,128 @@ export class FrontendStateService {
       this.loadError.set(this.i18n.t('failedDashboard'));
     } finally {
       this.isLoading.set(false);
+    }
+  }
+
+  async loadOperationsData(): Promise<void> {
+    try {
+      if (!this.models().length) {
+        const models = await firstValueFrom(this.http.get<ModelRef[]>('/api/models'));
+        this.models.set(models ?? []);
+      }
+      await this.loadJobs();
+    } catch {
+      this.jobActionError.set(this.i18n.t('failedJobs'));
+    }
+  }
+
+  async loadJobs(): Promise<void> {
+    this.jobsLoading.set(true);
+    try {
+      const jobs = await firstValueFrom(this.http.get<JobSummary[]>('/api/jobs', { params: { limit: 40 } }));
+      this.jobs.set(jobs ?? []);
+      const selected = this.selectedJobId();
+      if (selected !== null) {
+        await this.selectJob(selected);
+      } else if ((jobs ?? []).length > 0) {
+        await this.selectJob(jobs![0].id);
+      }
+    } catch {
+      this.jobActionError.set(this.i18n.t('failedJobs'));
+    } finally {
+      this.jobsLoading.set(false);
+    }
+  }
+
+  async selectJob(jobId: number): Promise<void> {
+    this.selectedJobId.set(jobId);
+    try {
+      const detail = await firstValueFrom(this.http.get<JobDetail>(`/api/jobs/${jobId}`));
+      this.selectedJobDetail.set(detail ?? null);
+    } catch {
+      this.selectedJobDetail.set(null);
+      this.jobActionError.set(this.i18n.t('failedJobDetail'));
+    }
+  }
+
+  async triggerRefreshData(clientId: number, startDate: string): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(
+        this.http.post<JobSummary>('/api/jobs/refresh-data', {
+          client_id: clientId,
+          start_date: startDate,
+        }),
+      );
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
+    }
+  }
+
+  async triggerBackfillRanking(modelId: number, signalDate: string, clientId: number): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(
+        this.http.post<JobSummary>('/api/jobs/backfill-ranking', {
+          model_id: modelId,
+          signal_date: signalDate,
+          client_id: clientId,
+        }),
+      );
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
+    }
+  }
+
+  async triggerAppendPortfolio(portfolioRunId: number, modelId: number | null, endDate: string): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(
+        this.http.post<JobSummary>('/api/jobs/append-portfolio', {
+          portfolio_run_id: portfolioRunId,
+          model_id: modelId,
+          end_date: endDate,
+        }),
+      );
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
+    }
+  }
+
+  async triggerDailyClosePipeline(
+    tradeDate: string,
+    clientId: number,
+    startDate: string,
+    includePortfolio: boolean,
+  ): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(
+        this.http.post<JobSummary>('/api/jobs/daily-close-pipeline', {
+          trade_date: tradeDate,
+          client_id: clientId,
+          start_date: startDate,
+          include_portfolio: includePortfolio,
+        }),
+      );
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
     }
   }
 

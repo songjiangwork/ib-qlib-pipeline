@@ -15,7 +15,15 @@ from .portfolio_store import (
     list_portfolio_runs,
 )
 from .model_store import list_models
-from .schemas import ManualRunRequest, ScheduleCreate, ScheduleUpdate
+from .schemas import (
+    DataRefreshJobRequest,
+    DailyClosePipelineJobRequest,
+    ManualRunRequest,
+    PortfolioAppendJobRequest,
+    RankingBackfillJobRequest,
+    ScheduleCreate,
+    ScheduleUpdate,
+)
 from .service import BusyError, NotFoundError, RankingBackendService
 from .settings import Settings
 
@@ -64,6 +72,47 @@ def create_app() -> FastAPI:
     @app.get("/api/models")
     def get_models() -> list[dict[str, Any]]:
         return list_models(settings.db_path)
+
+    @app.get("/api/jobs")
+    def get_jobs(limit: int = Query(default=30, ge=1, le=200)) -> list[dict[str, Any]]:
+        return get_service().list_jobs(limit=limit)
+
+    @app.get("/api/jobs/{job_id}")
+    def get_job(job_id: int) -> dict[str, Any]:
+        try:
+            return get_service().get_job(job_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/refresh-data")
+    def create_refresh_data_job(payload: DataRefreshJobRequest) -> dict[str, Any]:
+        try:
+            return get_service().trigger_data_refresh_job(payload.model_dump())
+        except BusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/backfill-ranking")
+    def create_backfill_job(payload: RankingBackfillJobRequest) -> dict[str, Any]:
+        try:
+            return get_service().trigger_backfill_job(payload.model_dump())
+        except BusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/append-portfolio")
+    def create_append_portfolio_job(payload: PortfolioAppendJobRequest) -> dict[str, Any]:
+        try:
+            return get_service().trigger_append_portfolio_job(payload.model_dump())
+        except BusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/daily-close-pipeline")
+    def create_daily_close_pipeline_job(payload: DailyClosePipelineJobRequest) -> dict[str, Any]:
+        try:
+            return get_service().trigger_daily_close_pipeline_job(payload.model_dump())
+        except BusyError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     @app.post("/api/schedules")
     def create_schedule(payload: ScheduleCreate) -> dict[str, Any]:

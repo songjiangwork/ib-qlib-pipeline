@@ -120,6 +120,33 @@ CREATE TABLE IF NOT EXISTS portfolio_marks (
     UNIQUE(portfolio_lot_id, trade_date)
 );
 
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload_json TEXT,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    requested_by TEXT,
+    log_output TEXT,
+    error_text TEXT
+);
+
+CREATE TABLE IF NOT EXISTS job_steps (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    step_order INTEGER NOT NULL,
+    step_name TEXT NOT NULL,
+    status TEXT NOT NULL,
+    command TEXT,
+    started_at TEXT,
+    finished_at TEXT,
+    log_output TEXT,
+    error_text TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_signal_date ON runs(signal_date DESC);
 CREATE INDEX IF NOT EXISTS idx_recommendations_run_id ON recommendations(run_id, rank);
@@ -129,6 +156,8 @@ CREATE INDEX IF NOT EXISTS idx_portfolio_lots_run_symbol ON portfolio_lots(portf
 CREATE INDEX IF NOT EXISTS idx_portfolio_lots_entry_date ON portfolio_lots(entry_trade_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_marks_lot_date ON portfolio_marks(portfolio_lot_id, trade_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_marks_trade_date ON portfolio_marks(trade_date);
+CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_steps_job_order ON job_steps(job_id, step_order);
 """
 
 

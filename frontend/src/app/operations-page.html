@@ -1,0 +1,164 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('operations') }}</p>
+      <h2>{{ i18n.t('workflowOps') }}</h2>
+      <p class="muted">{{ i18n.t('workflowOpsSubtitle') }}</p>
+    </div>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('runningJobs') }}</span>
+        <strong>{{ runningJobs().length }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('models') }}</span>
+        <strong>{{ state.models().length }}</strong>
+      </div>
+    </div>
+  </div>
+
+  @if (state.jobActionError()) {
+    <div class="notice error">{{ state.jobActionError() }}</div>
+  }
+
+  <div class="ops-grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('dailyClosePipeline') }}</h3>
+      </div>
+      <label class="field">
+        <span>{{ i18n.t('tradeDate') }}</span>
+        <input type="date" [ngModel]="pipelineTradeDate()" (ngModelChange)="pipelineTradeDate.set($event)" />
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('refreshStartDate') }}</span>
+        <input type="date" [ngModel]="pipelineStartDate()" (ngModelChange)="pipelineStartDate.set($event)" />
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('clientId') }}</span>
+        <input type="number" [ngModel]="pipelineClientId()" (ngModelChange)="pipelineClientId.set(+$event)" />
+      </label>
+      <label class="check">
+        <input type="checkbox" [ngModel]="pipelineIncludePortfolio()" (ngModelChange)="pipelineIncludePortfolio.set(!!$event)" />
+        <span>{{ i18n.t('includePortfolioAppend') }}</span>
+      </label>
+      <button type="button" class="primary" (click)="runDailyClosePipeline()">{{ i18n.t('runPipeline') }}</button>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('refreshData') }}</h3>
+      </div>
+      <label class="field">
+        <span>{{ i18n.t('refreshStartDate') }}</span>
+        <input type="date" [ngModel]="refreshStartDate()" (ngModelChange)="refreshStartDate.set($event)" />
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('clientId') }}</span>
+        <input type="number" [ngModel]="refreshClientId()" (ngModelChange)="refreshClientId.set(+$event)" />
+      </label>
+      <button type="button" class="primary" (click)="runRefreshData()">{{ i18n.t('runRefreshData') }}</button>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('backfillRanking') }}</h3>
+      </div>
+      <label class="field">
+        <span>{{ i18n.t('tradeDate') }}</span>
+        <input type="date" [ngModel]="backfillTradeDate()" (ngModelChange)="backfillTradeDate.set($event)" />
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('clientId') }}</span>
+        <input type="number" [ngModel]="backfillClientId()" (ngModelChange)="backfillClientId.set(+$event)" />
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('model') }}</span>
+        <select [ngModel]="backfillModelId()" (ngModelChange)="backfillModelId.set(+$event)">
+          @for (model of state.models(); track model.id) {
+            <option [ngValue]="model.id">{{ model.name }} ({{ model.key }})</option>
+          }
+        </select>
+      </label>
+      <button type="button" class="primary" (click)="runBackfill()">{{ i18n.t('runBackfill') }}</button>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('appendPortfolio') }}</h3>
+      </div>
+      <label class="field">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <select [ngModel]="appendPortfolioRunId()" (ngModelChange)="appendPortfolioRunId.set(+$event)">
+          @for (run of state.portfolioRuns(); track run.id) {
+            <option [ngValue]="run.id">#{{ run.id }} {{ run.name }}</option>
+          }
+        </select>
+      </label>
+      <label class="field">
+        <span>{{ i18n.t('signalEndDate') }}</span>
+        <input type="date" [ngModel]="appendEndDate()" (ngModelChange)="appendEndDate.set($event)" />
+      </label>
+      <button type="button" class="primary" (click)="runAppendPortfolio()">{{ i18n.t('runAppendPortfolio') }}</button>
+    </section>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('recentJobs') }}</h3>
+        <span>{{ state.jobsLoading() ? i18n.t('loading') : state.jobs().length }}</span>
+      </div>
+      <div class="stack">
+        @for (job of state.jobs(); track job.id) {
+          <button type="button" class="item-card" [class.active]="state.selectedJobId() === job.id" (click)="openJob(job.id)">
+            <strong>#{{ job.id }} {{ job.title }}</strong>
+            <span>{{ job.job_type }}</span>
+            <span class="status" [class.running]="job.status === 'running' || job.status === 'queued'" [class.failed]="job.status === 'failed'">
+              {{ job.status }}
+            </span>
+          </button>
+        }
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('jobDetail') }}</h3>
+      </div>
+      @if (state.selectedJobDetail(); as job) {
+        <div class="job-meta">
+          <div><span>{{ i18n.t('status') }}</span><strong>{{ job.status }}</strong></div>
+          <div><span>{{ i18n.t('createdAt') }}</span><strong>{{ job.created_at }}</strong></div>
+          <div><span>{{ i18n.t('finishedAt') }}</span><strong>{{ job.finished_at || 'N/A' }}</strong></div>
+        </div>
+        <div class="steps">
+          @for (step of job.steps; track step.id) {
+            <article class="step">
+              <div class="step-head">
+                <strong>{{ step.step_order }}. {{ step.step_name }}</strong>
+                <span class="status" [class.running]="step.status === 'running' || step.status === 'queued'" [class.failed]="step.status === 'failed'">
+                  {{ step.status }}
+                </span>
+              </div>
+              @if (step.command) {
+                <pre>{{ step.command }}</pre>
+              }
+              @if (step.log_output) {
+                <details>
+                  <summary>{{ i18n.t('stepLog') }}</summary>
+                  <pre>{{ step.log_output }}</pre>
+                </details>
+              }
+              @if (step.error_text) {
+                <div class="notice error">{{ step.error_text }}</div>
+              }
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty">{{ i18n.t('selectJob') }}</div>
+      }
+    </section>
+  </div>
+</section>
