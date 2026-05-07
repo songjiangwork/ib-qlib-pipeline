@@ -870,7 +870,12 @@ class RankingBackendService:
         for model in models:
             portfolio_run = self._latest_portfolio_run_for_model(int(model["id"]))
             if portfolio_run is None:
-                raise RuntimeError(f"No portfolio run found for model_id={model['id']}")
+                self._record_job_note(
+                    job_id,
+                    step_name=f"append_{model['key']}_portfolio",
+                    message=f"Skipped portfolio append for model_id={model['id']} ({model['name']}): no portfolio run found yet",
+                )
+                continue
             self._run_job_step(
                 job_id,
                 f"append_{model['key']}_portfolio",
@@ -962,6 +967,37 @@ class RankingBackendService:
         if rc != 0:
             raise RuntimeError(error_text or f"Step failed: {step_name}")
         return combined_output
+
+    def _record_job_note(self, job_id: int, step_name: str, message: str) -> None:
+        now = dt.datetime.now(dt.timezone.utc).isoformat()
+        with connect(self.settings.db_path) as conn:
+            step_order = int(
+                conn.execute(
+                    "SELECT COALESCE(MAX(step_order), 0) + 1 FROM job_steps WHERE job_id = ?",
+                    (job_id,),
+                ).fetchone()[0]
+            )
+            conn.execute(
+                """
+                INSERT INTO job_steps (
+                    job_id, step_order, step_name, status, command, started_at, finished_at, log_output
+                ) VALUES (?, ?, ?, 'succeeded', ?, ?, ?, ?)
+                """,
+                (job_id, step_order, step_name, message, now, now, message),
+            )
+            conn.execute(
+                """
+                UPDATE jobs
+                SET log_output = COALESCE(log_output, '') ||
+                    CASE
+                      WHEN COALESCE(log_output, '') = '' THEN ''
+                      ELSE char(10) || char(10)
+                    END ||
+                    ?
+                WHERE id = ?
+                """,
+                (f"[{step_name}]\n{message}".strip(), job_id),
+            )
 
     def _finalize_run_from_output(self, run_id: int, schedule_id: int | None, combined_output: str) -> None:
         artifacts = self._parse_run_output(combined_output)

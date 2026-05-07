@@ -34,6 +34,8 @@ def build_daily_runtime_workflow(
     wf = yaml.safe_load(yaml.safe_dump(base_workflow, sort_keys=False, allow_unicode=False)) if base_workflow else load_base_workflow(runtime_cfg.project_root, workflow_base)
     workflow_stem = Path(workflow_base).stem.replace("workflow_", "")
     experiment_name = build_run_token(f"daily_{workflow_stem}_{latest_trade_date.isoformat()}")
+    wf.setdefault("qlib_init", {})
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
     wf["data_handler_config"]["end_time"] = latest_trade_date.isoformat()
     wf["task"]["dataset"]["kwargs"]["segments"]["test"][1] = latest_trade_date.isoformat()
     wf["port_analysis_config"]["backtest"]["end_time"] = backtest_end.isoformat()
@@ -55,6 +57,8 @@ def build_backfill_runtime_workflow(
     workflow_stem = Path(workflow_base).stem.replace("workflow_", "")
     trade_date_str = trade_date.isoformat()
     experiment_name = build_run_token(f"backfill_{model_key}_{workflow_stem}_{trade_date_str}")
+    wf.setdefault("qlib_init", {})
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
     wf["data_handler_config"]["end_time"] = trade_date_str
     wf["task"]["dataset"]["kwargs"]["segments"]["test"][1] = trade_date_str
     wf["task"]["record"] = [
