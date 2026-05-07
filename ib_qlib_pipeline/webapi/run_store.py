@@ -6,7 +6,8 @@ from typing import Any
 
 import pandas as pd
 
-from .db import connect
+from ..dborm.models import Recommendation, Run
+from ..dborm.session import create_session_factory_for_path
 
 
 def ranking_df_to_rows(ranking_df: pd.DataFrame) -> list[dict[str, Any]]:
@@ -55,53 +56,51 @@ def insert_completed_run(
     finished_at = finished_at or created_at
     signal_date = pd.to_datetime(ranking_df["signal_date"]).dt.date.iloc[0].isoformat()
 
-    with connect(db_path) as conn:
-        cursor = conn.execute(
-            """
-            INSERT INTO runs (
-                schedule_id, model_id, trigger_source, status, client_id, lookback_days,
-                workflow_base, command, created_at, started_at, finished_at,
-                signal_date, ranking_csv_path, html_report_path, experiment_id,
-                recorder_id, row_count, log_output, error_text
-            ) VALUES (?, ?, ?, 'succeeded', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
-            """,
-            (
-                schedule_id,
-                model_id,
-                trigger_source,
-                client_id,
-                lookback_days,
-                workflow_base,
-                command,
-                created_at,
-                started_at,
-                finished_at,
-                signal_date,
-                str(ranking_csv_path),
-                str(html_report_path) if html_report_path is not None else None,
-                experiment_id,
-                recorder_id,
-                len(recommendations),
-                log_output,
-            ),
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        run = Run(
+            schedule_id=schedule_id,
+            model_id=model_id,
+            trigger_source=trigger_source,
+            status="succeeded",
+            client_id=client_id,
+            lookback_days=lookback_days,
+            workflow_base=workflow_base,
+            command=command,
+            created_at=created_at,
+            started_at=started_at,
+            finished_at=finished_at,
+            signal_date=signal_date,
+            ranking_csv_path=str(ranking_csv_path),
+            html_report_path=str(html_report_path) if html_report_path is not None else None,
+            experiment_id=experiment_id,
+            recorder_id=recorder_id,
+            row_count=len(recommendations),
+            log_output=log_output,
+            error_text=None,
         )
-        run_id = int(cursor.lastrowid)
-        conn.executemany(
-            """
-            INSERT INTO recommendations (run_id, rank, symbol, score, percentile, entry_price, signal_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
+        session.add(run)
+        session.flush()
+
+        session.add_all(
             [
-                (
-                    run_id,
-                    int(row["rank"]),
-                    str(row["symbol"]),
-                    float(row["score"]),
-                    float(row["percentile"]) if row["percentile"] is not None else None,
-                    float(row["entry_price"]) if row["entry_price"] is not None else None,
-                    str(row["signal_date"]),
+                Recommendation(
+                    run_id=int(run.id),
+                    rank=int(row["rank"]),
+                    symbol=str(row["symbol"]),
+                    score=float(row["score"]),
+                    percentile=float(row["percentile"]) if row["percentile"] is not None else None,
+                    entry_price=float(row["entry_price"]) if row["entry_price"] is not None else None,
+                    signal_date=str(row["signal_date"]),
                 )
                 for row in recommendations
-            ],
+            ]
         )
-    return run_id
+        session.commit()
+        return int(run.id)
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
