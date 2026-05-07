@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import datetime as dt
 import json
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import yaml
+from sqlalchemy import create_engine, select
+from sqlalchemy.orm import Session, sessionmaker
 
-from .db import connect, rows_to_dicts
+from ..dborm.models import ModelRef
 
 
 DEFAULT_MODELS: list[dict[str, Any]] = [
@@ -86,65 +89,82 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
 ]
 
 
+@lru_cache(maxsize=8)
+def _session_factory_for_path(db_path_str: str) -> sessionmaker:
+    engine = create_engine(f"sqlite:///{Path(db_path_str).resolve()}", future=True)
+    return sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+
+def _session_for_db(db_path: Path) -> Session:
+    return _session_factory_for_path(str(db_path))()
+
+
+def _model_to_dict(model: ModelRef) -> dict[str, Any]:
+    item = {
+        "id": model.id,
+        "key": model.key,
+        "name": model.name,
+        "model_class": model.model_class,
+        "module_path": model.module_path,
+        "workflow_base": model.workflow_base,
+        "details_json": model.details_json,
+        "created_at": model.created_at,
+        "updated_at": model.updated_at,
+    }
+    item["details"] = json.loads(model.details_json) if model.details_json else None
+    return item
+
+
 def ensure_default_models(db_path: Path) -> None:
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    with connect(db_path) as conn:
+    with _session_for_db(db_path) as session:
         for model in DEFAULT_MODELS:
-            conn.execute(
-                """
-                INSERT INTO models (
-                    key, name, model_class, module_path, workflow_base,
-                    details_json, created_at, updated_at
+            existing = session.execute(
+                select(ModelRef).where(ModelRef.key == model["key"])
+            ).scalar_one_or_none()
+            if existing is None:
+                session.add(
+                    ModelRef(
+                        key=model["key"],
+                        name=model["name"],
+                        model_class=model["model_class"],
+                        module_path=model["module_path"],
+                        workflow_base=model["workflow_base"],
+                        details_json=json.dumps(model["details"], ensure_ascii=True, sort_keys=True),
+                        created_at=now,
+                        updated_at=now,
+                    )
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(key) DO UPDATE SET
-                    name = excluded.name,
-                    model_class = excluded.model_class,
-                    module_path = excluded.module_path,
-                    workflow_base = excluded.workflow_base,
-                    details_json = excluded.details_json,
-                    updated_at = excluded.updated_at
-                """,
-                (
-                    model["key"],
-                    model["name"],
-                    model["model_class"],
-                    model["module_path"],
-                    model["workflow_base"],
-                    json.dumps(model["details"], ensure_ascii=True, sort_keys=True),
-                    now,
-                    now,
-                ),
-            )
+                continue
+            existing.name = model["name"]
+            existing.model_class = model["model_class"]
+            existing.module_path = model["module_path"]
+            existing.workflow_base = model["workflow_base"]
+            existing.details_json = json.dumps(model["details"], ensure_ascii=True, sort_keys=True)
+            existing.updated_at = now
+        session.commit()
 
 
 def list_models(db_path: Path) -> list[dict[str, Any]]:
-    with connect(db_path) as conn:
-        rows = conn.execute("SELECT * FROM models ORDER BY id").fetchall()
-    items = rows_to_dicts(rows)
-    for item in items:
-        item["details"] = json.loads(item["details_json"]) if item.get("details_json") else None
-    return items
+    with _session_for_db(db_path) as session:
+        rows = session.execute(select(ModelRef).order_by(ModelRef.id)).scalars().all()
+    return [_model_to_dict(row) for row in rows]
 
 
 def get_model(db_path: Path, model_id: int) -> dict[str, Any] | None:
-    with connect(db_path) as conn:
-        row = conn.execute("SELECT * FROM models WHERE id = ?", (model_id,)).fetchone()
+    with _session_for_db(db_path) as session:
+        row = session.get(ModelRef, model_id)
     if row is None:
         return None
-    item = dict(row)
-    item["details"] = json.loads(item["details_json"]) if item.get("details_json") else None
-    return item
+    return _model_to_dict(row)
 
 
 def get_model_by_key(db_path: Path, key: str) -> dict[str, Any] | None:
-    with connect(db_path) as conn:
-        row = conn.execute("SELECT * FROM models WHERE key = ?", (key,)).fetchone()
+    with _session_for_db(db_path) as session:
+        row = session.execute(select(ModelRef).where(ModelRef.key == key)).scalar_one_or_none()
     if row is None:
         return None
-    item = dict(row)
-    item["details"] = json.loads(item["details_json"]) if item.get("details_json") else None
-    return item
+    return _model_to_dict(row)
 
 
 def infer_model_from_workflow(project_root: Path, workflow_base: str) -> dict[str, Any]:
@@ -165,41 +185,26 @@ def infer_model_from_workflow(project_root: Path, workflow_base: str) -> dict[st
 
 def resolve_or_create_model_for_workflow(db_path: Path, project_root: Path, workflow_base: str) -> int:
     inferred = infer_model_from_workflow(project_root, workflow_base)
-    with connect(db_path) as conn:
-        row = conn.execute(
-            """
-            SELECT id
-            FROM models
-            WHERE workflow_base = ?
-            LIMIT 1
-            """,
-            (
-                workflow_base,
-            ),
-        ).fetchone()
+    with _session_for_db(db_path) as session:
+        row = session.execute(
+            select(ModelRef).where(ModelRef.workflow_base == workflow_base).limit(1)
+        ).scalar_one_or_none()
         if row is not None:
-            return int(row["id"])
+            return int(row.id)
 
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         workflow_stem = Path(workflow_base).stem.lower()
-        key = workflow_stem
-        cursor = conn.execute(
-            """
-            INSERT INTO models (
-                key, name, model_class, module_path, workflow_base,
-                details_json, created_at, updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                f"{key}-{abs(hash((workflow_base, inferred['model_class'], inferred['module_path']))) % 100000}",
-                workflow_stem,
-                inferred["model_class"],
-                inferred["module_path"],
-                workflow_base,
-                json.dumps({"auto_created": True, "workflow_stem": workflow_stem}, ensure_ascii=True, sort_keys=True),
-                now,
-                now,
-            ),
+        item = ModelRef(
+            key=f"{workflow_stem}-{abs(hash((workflow_base, inferred['model_class'], inferred['module_path']))) % 100000}",
+            name=workflow_stem,
+            model_class=inferred["model_class"],
+            module_path=inferred["module_path"],
+            workflow_base=workflow_base,
+            details_json=json.dumps({"auto_created": True, "workflow_stem": workflow_stem}, ensure_ascii=True, sort_keys=True),
+            created_at=now,
+            updated_at=now,
         )
-        return int(cursor.lastrowid)
+        session.add(item)
+        session.commit()
+        session.refresh(item)
+        return int(item.id)
