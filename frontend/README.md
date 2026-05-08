@@ -1,59 +1,82 @@
 # Frontend
 
-This project was generated using [Angular CLI](https://github.com/angular/angular-cli) version 21.2.9.
+Angular 前端，用于查看和操作整个 `ib-qlib-pipeline` 系统。
 
-## Development server
+当前主要页面：
 
-To start a local development server, run:
+- `/rankings`
+- `/symbols/:symbol`
+- `/compare`
+- `/operations`
 
-```bash
-ng serve
-```
+## 作用
 
-Once the server is running, open your browser and navigate to `http://localhost:4200/`. The application will automatically reload whenever you modify any of the source files.
+前端当前承担的主要职责：
 
-## Code scaffolding
+- 查看某天 `TOP20` ranking
+- 查看单只股票的 lot / mark / 价格图
+- 比较不同模型和不同 portfolio run
+- 手动触发 jobs
+- 查看 job 日志和今日状态
+- 管理 schedule
 
-Angular CLI includes powerful code scaffolding tools. To generate a new component, run:
+## 本地开发
 
-```bash
-ng generate component component-name
-```
-
-For a complete list of available schematics (such as `components`, `directives`, or `pipes`), run:
-
-```bash
-ng generate --help
-```
-
-## Building
-
-To build the project run:
+推荐从项目根目录启动，而不是直接手工 `ng serve`：
 
 ```bash
-ng build
+cd /home/song/projects/ib-qlib-pipeline
+FRONTEND_BACKEND_PORT=8001 ./start_frontend.sh
 ```
 
-This will compile your project and store the build artifacts in the `dist/` directory. By default, the production build optimizes your application for performance and speed.
-
-## Running unit tests
-
-To execute unit tests with the [Vitest](https://vitest.dev/) test runner, use the following command:
+停止：
 
 ```bash
-ng test
+./stop_frontend.sh
 ```
 
-## Running end-to-end tests
+默认行为：
 
-For end-to-end (e2e) testing, run:
+- 监听 `0.0.0.0:9991`
+- 将 `/api` 代理到后端
+
+## 直接使用 Angular CLI
+
+如果你只想在 `frontend/` 目录里单独调前端，也可以：
 
 ```bash
-ng e2e
+cd /home/song/projects/ib-qlib-pipeline/frontend
+npm install
+npm start
 ```
 
-Angular CLI does not come with an end-to-end testing framework by default. You can choose one that suits your needs.
+或：
 
-## Additional Resources
+```bash
+ng serve --host 0.0.0.0 --port 9991 --proxy-config proxy.conf.json
+```
 
-For more information on using the Angular CLI, including detailed command references, visit the [Angular CLI Overview and Command Reference](https://angular.dev/tools/cli) page.
+## 构建
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+npm --prefix frontend run build
+```
+
+## 技术栈
+
+- Angular
+- TypeScript
+- `lightweight-charts`
+
+## 当前说明
+
+这个前端不是独立产品，它依赖：
+
+- 后端 API
+- SQLite 中的 ranking / portfolio / jobs 数据
+- `/operations` 里的任务执行模型
+
+所以前端验证通常应和后端一起进行。详见根目录：
+
+- [../README.md](../README.md)
