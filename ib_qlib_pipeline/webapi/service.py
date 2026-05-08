@@ -423,16 +423,14 @@ class RankingBackendService:
                 requested_by="web",
                 created_at=now,
             )
-            with connect(self.settings.db_path) as conn:
-                if schedule_id is not None:
-                    conn.execute(
-                        """
-                        UPDATE schedules
-                        SET last_triggered_at = ?, last_run_status = 'queued', updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (now, now, schedule_id),
-                    )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=now,
+                    last_triggered_at=now,
+                    last_run_status="queued",
+                )
             thread = threading.Thread(
                 target=self._execute_job_thread,
                 args=(job_id, target, payload, schedule_id),
@@ -510,30 +508,33 @@ class RankingBackendService:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
             mark_job_running(self.settings.db_path, job_id, started_at)
-            with connect(self.settings.db_path) as conn:
-                if schedule_id is not None:
-                    conn.execute(
-                        "UPDATE schedules SET last_run_status = 'running', updated_at = ? WHERE id = ?",
-                        (started_at, schedule_id),
-                    )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=started_at,
+                    last_run_status="running",
+                )
             target(job_id, payload)
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
             mark_job_finished(self.settings.db_path, job_id, status="succeeded", finished_at=finished_at, error_text=None)
-            with connect(self.settings.db_path) as conn:
-                if schedule_id is not None:
-                    conn.execute(
-                        "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
-                        (finished_at, schedule_id),
-                    )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=finished_at,
+                    last_run_status="succeeded",
+                )
         except Exception as exc:  # noqa: BLE001
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
             mark_job_finished(self.settings.db_path, job_id, status="failed", finished_at=finished_at, error_text=str(exc))
-            with connect(self.settings.db_path) as conn:
-                if schedule_id is not None:
-                    conn.execute(
-                        "UPDATE schedules SET last_run_status = 'failed', updated_at = ? WHERE id = ?",
-                        (finished_at, schedule_id),
-                    )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=finished_at,
+                    last_run_status="failed",
+                )
         finally:
             self._run_lock.release()
 

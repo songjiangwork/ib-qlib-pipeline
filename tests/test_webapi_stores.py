@@ -214,6 +214,92 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual("boom", run["error_text"])
         self.assertEqual("failed", updated_schedule["last_run_status"])
 
+    def test_service_start_job_marks_schedule_queued(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        class FakeThread:
+            def __init__(self, *args, **kwargs) -> None:
+                self.args = args
+                self.kwargs = kwargs
+
+            def start(self) -> None:
+                return None
+
+        with patch("ib_qlib_pipeline.webapi.service.threading.Thread", FakeThread):
+            job = service._start_job(
+                job_type="refresh_data",
+                title="Refresh",
+                payload={"start_date": "2026-05-01", "client_id": 151},
+                target=lambda *_args, **_kwargs: None,
+                schedule_id=schedule["id"],
+            )
+
+        updated_schedule = get_schedule(self.db_path, schedule["id"])
+        self.assertEqual("queued", job["status"])
+        self.assertEqual("queued", updated_schedule["last_run_status"])
+        self.assertIsNotNone(updated_schedule["last_triggered_at"])
+        if service._run_lock.locked():
+            service._run_lock.release()
+
+    def test_service_execute_job_thread_success_updates_schedule_and_releases_lock(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        job_id = create_job(
+            self.db_path,
+            job_type="refresh_data",
+            title="Refresh",
+            payload_json='{"start_date":"2026-05-01","client_id":151}',
+        )
+
+        service._run_lock.acquire()
+        service._execute_job_thread(
+            job_id,
+            target=lambda *_args, **_kwargs: None,
+            payload={"start_date": "2026-05-01", "client_id": 151},
+            schedule_id=schedule["id"],
+        )
+
+        job = get_job(self.db_path, job_id)
+        updated_schedule = get_schedule(self.db_path, schedule["id"])
+        self.assertEqual("succeeded", job["status"])
+        self.assertEqual("succeeded", updated_schedule["last_run_status"])
+        self.assertFalse(service._run_lock.locked())
+
     def test_service_finalize_run_from_output_updates_run_and_recommendations(self) -> None:
         service = self._make_service()
         schedule = create_schedule(
