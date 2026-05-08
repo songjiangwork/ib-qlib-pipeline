@@ -141,6 +141,78 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(1, len(recs))
         self.assertEqual("AAPL", recs[0]["symbol"])
 
+    def test_service_create_run_record_updates_schedule(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        run_id = service._create_run_record(
+            schedule_id=schedule["id"],
+            trigger_source="schedule",
+            client_id=151,
+            lookback_days=7,
+            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        run = service.get_run(run_id)
+        updated_schedule = get_schedule(self.db_path, schedule["id"])
+        self.assertEqual("queued", run["status"])
+        self.assertEqual("schedule", run["trigger_source"])
+        self.assertEqual(run_id, updated_schedule["last_run_id"])
+        self.assertEqual("queued", updated_schedule["last_run_status"])
+
+    def test_service_mark_run_failed_updates_schedule(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        run_id = service._create_run_record(
+            schedule_id=schedule["id"],
+            trigger_source="schedule",
+            client_id=151,
+            lookback_days=7,
+            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        service._mark_run_failed(run_id, schedule["id"], "boom")
+
+        run = service.get_run(run_id)
+        updated_schedule = get_schedule(self.db_path, schedule["id"])
+        self.assertEqual("failed", run["status"])
+        self.assertEqual("boom", run["error_text"])
+        self.assertEqual("failed", updated_schedule["last_run_status"])
+
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
         portfolio_run_id = create_portfolio_run(

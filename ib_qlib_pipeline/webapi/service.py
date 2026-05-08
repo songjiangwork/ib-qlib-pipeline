@@ -31,11 +31,13 @@ from .job_store import (
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
+    create_queued_run,
     get_run as get_run_record,
     get_run_recommendations as get_run_recommendation_records,
     latest_backfill_signal_date_for_model,
     list_ranking_dates as list_ranking_date_records,
     list_runs as list_run_records,
+    mark_run_failed as mark_run_failed_record,
     ranking_df_to_rows,
 )
 from .schedule_store import (
@@ -43,6 +45,7 @@ from .schedule_store import (
     delete_schedule as delete_schedule_record,
     get_schedule as get_schedule_record,
     list_schedules as list_schedule_records,
+    update_schedule_run_state,
     update_schedule as update_schedule_record,
 )
 from .settings import Settings
@@ -463,35 +466,26 @@ class RankingBackendService:
             "--workflow-base",
             workflow_base,
         ]
-        with connect(self.settings.db_path) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO runs (
-                    schedule_id, model_id, trigger_source, status, client_id, lookback_days,
-                    workflow_base, command, created_at
-                ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
-                """,
-                (
-                    schedule_id,
-                    model_id,
-                    trigger_source,
-                    client_id,
-                    lookback_days,
-                    workflow_base,
-                    " ".join(command),
-                    now,
-                ),
+        run_id = create_queued_run(
+            db_path=self.settings.db_path,
+            schedule_id=schedule_id,
+            model_id=model_id,
+            trigger_source=trigger_source,
+            client_id=client_id,
+            lookback_days=lookback_days,
+            workflow_base=workflow_base,
+            command=" ".join(command),
+            created_at=now,
+        )
+        if schedule_id is not None:
+            update_schedule_run_state(
+                self.settings.db_path,
+                schedule_id,
+                updated_at=now,
+                last_triggered_at=now,
+                last_run_id=run_id,
+                last_run_status="queued",
             )
-            run_id = int(cursor.lastrowid)
-            if schedule_id is not None:
-                conn.execute(
-                    """
-                    UPDATE schedules
-                    SET last_triggered_at = ?, last_run_id = ?, last_run_status = 'queued', updated_at = ?
-                    WHERE id = ?
-                    """,
-                    (now, run_id, now, schedule_id),
-                )
         return run_id
 
     def _backfill_legacy_run_models(self) -> None:
@@ -957,23 +951,19 @@ class RankingBackendService:
 
     def _mark_run_failed(self, run_id: int, schedule_id: int | None, error_text: str) -> None:
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        with connect(self.settings.db_path) as conn:
-            conn.execute(
-                """
-                UPDATE runs
-                SET status = 'failed',
-                    finished_at = ?,
-                    error_text = ?,
-                    log_output = COALESCE(log_output, ?)
-                WHERE id = ?
-                """,
-                (finished_at, error_text, error_text, run_id),
+        mark_run_failed_record(
+            self.settings.db_path,
+            run_id,
+            finished_at=finished_at,
+            error_text=error_text,
+        )
+        if schedule_id is not None:
+            update_schedule_run_state(
+                self.settings.db_path,
+                schedule_id,
+                updated_at=finished_at,
+                last_run_status="failed",
             )
-            if schedule_id is not None:
-                conn.execute(
-                    "UPDATE schedules SET last_run_status = 'failed', updated_at = ? WHERE id = ?",
-                    (finished_at, schedule_id),
-                )
 
     def _parse_run_output(self, output: str) -> dict[str, str]:
         patterns = {

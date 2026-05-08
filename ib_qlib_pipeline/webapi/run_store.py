@@ -107,6 +107,41 @@ def insert_completed_run(
         session.close()
 
 
+def create_queued_run(
+    *,
+    db_path: Path,
+    schedule_id: int | None,
+    model_id: int,
+    trigger_source: str,
+    client_id: int,
+    lookback_days: int,
+    workflow_base: str,
+    command: str,
+    created_at: str | None = None,
+) -> int:
+    created_at = created_at or dt.datetime.now(dt.timezone.utc).isoformat()
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        run = Run(
+            schedule_id=schedule_id,
+            model_id=model_id,
+            trigger_source=trigger_source,
+            status="queued",
+            client_id=client_id,
+            lookback_days=lookback_days,
+            workflow_base=workflow_base,
+            command=command,
+            created_at=created_at,
+        )
+        session.add(run)
+        session.commit()
+        session.refresh(run)
+        return int(run.id)
+    finally:
+        session.close()
+
+
 def list_runs(
     db_path: Path,
     *,
@@ -314,5 +349,27 @@ def latest_backfill_signal_date_for_model(db_path: Path, model_id: int) -> dt.da
         if not latest_signal:
             return None
         return dt.date.fromisoformat(str(latest_signal))
+    finally:
+        session.close()
+
+
+def mark_run_failed(
+    db_path: Path,
+    run_id: int,
+    *,
+    finished_at: str,
+    error_text: str,
+) -> None:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        run = session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = "failed"
+        run.finished_at = finished_at
+        run.error_text = error_text
+        run.log_output = run.log_output or error_text
+        session.commit()
     finally:
         session.close()

@@ -123,3 +123,27 @@ def delete_schedule(db_path: Path, schedule_id: int) -> bool:
         session.delete(schedule)
         session.commit()
         return True
+
+
+def update_schedule_run_state(
+    db_path: Path,
+    schedule_id: int,
+    *,
+    updated_at: str,
+    last_triggered_at: str | None = None,
+    last_run_id: int | None = None,
+    last_run_status: str | None = None,
+) -> bool:
+    with _session_for_db(db_path) as session:
+        schedule = session.get(Schedule, schedule_id)
+        if schedule is None:
+            return False
+        schedule.updated_at = updated_at
+        if last_triggered_at is not None:
+            schedule.last_triggered_at = last_triggered_at
+        if last_run_id is not None:
+            schedule.last_run_id = last_run_id
+        if last_run_status is not None:
+            schedule.last_run_status = last_run_status
+        session.commit()
+        return True
