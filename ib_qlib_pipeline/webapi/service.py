@@ -16,6 +16,18 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import connect, init_db, rows_to_dicts
+from .job_store import (
+    append_job_log,
+    append_job_step_output,
+    create_job as create_job_record,
+    create_job_step,
+    get_job as get_job_record,
+    list_jobs as list_job_records,
+    mark_job_finished,
+    mark_job_running,
+    next_job_step_order,
+    update_job_step,
+)
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .portfolio_store import list_portfolio_runs
 from .run_store import ranking_df_to_rows
@@ -117,17 +129,7 @@ class RankingBackendService:
         return rows_to_dicts(rows)
 
     def list_jobs(self, limit: int = 30) -> list[dict[str, Any]]:
-        with connect(self.settings.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM jobs
-                ORDER BY created_at DESC, id DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
-        return rows_to_dicts(rows)
+        return list_job_records(self.settings.db_path, limit=limit)
 
     def get_operations_summary(self, trade_date: str) -> dict[str, Any]:
         trade_day = dt.date.fromisoformat(trade_date)
@@ -172,21 +174,9 @@ class RankingBackendService:
         }
 
     def get_job(self, job_id: int) -> dict[str, Any]:
-        with connect(self.settings.db_path) as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-            if row is None:
-                raise NotFoundError(f"Job {job_id} not found")
-            steps = conn.execute(
-                """
-                SELECT *
-                FROM job_steps
-                WHERE job_id = ?
-                ORDER BY step_order, id
-                """,
-                (job_id,),
-            ).fetchall()
-        item = dict(row)
-        item["steps"] = rows_to_dicts(steps)
+        item = get_job_record(self.settings.db_path, job_id)
+        if item is None:
+            raise NotFoundError(f"Job {job_id} not found")
         return item
 
     def retry_job(self, job_id: int) -> dict[str, Any]:
@@ -481,22 +471,15 @@ class RankingBackendService:
             raise BusyError("Another backend run or job is already in progress")
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
+            job_id = create_job_record(
+                self.settings.db_path,
+                job_type=job_type,
+                title=title,
+                payload_json=json.dumps(payload, ensure_ascii=True, sort_keys=True),
+                requested_by="web",
+                created_at=now,
+            )
             with connect(self.settings.db_path) as conn:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO jobs (
-                        job_type, title, status, payload_json, created_at, requested_by
-                    ) VALUES (?, ?, 'queued', ?, ?, ?)
-                    """,
-                    (
-                        job_type,
-                        title,
-                        json.dumps(payload, ensure_ascii=True, sort_keys=True),
-                        now,
-                        "web",
-                    ),
-                )
-                job_id = int(cursor.lastrowid)
                 if schedule_id is not None:
                     conn.execute(
                         """
@@ -591,11 +574,8 @@ class RankingBackendService:
     def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any], schedule_id: int | None) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
+            mark_job_running(self.settings.db_path, job_id, started_at)
             with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?",
-                    (started_at, job_id),
-                )
                 if schedule_id is not None:
                     conn.execute(
                         "UPDATE schedules SET last_run_status = 'running', updated_at = ? WHERE id = ?",
@@ -603,11 +583,8 @@ class RankingBackendService:
                     )
             target(job_id, payload)
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            mark_job_finished(self.settings.db_path, job_id, status="succeeded", finished_at=finished_at, error_text=None)
             with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    "UPDATE jobs SET status = 'succeeded', finished_at = ?, error_text = NULL WHERE id = ?",
-                    (finished_at, job_id),
-                )
                 if schedule_id is not None:
                     conn.execute(
                         "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
@@ -615,11 +592,8 @@ class RankingBackendService:
                     )
         except Exception as exc:  # noqa: BLE001
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
+            mark_job_finished(self.settings.db_path, job_id, status="failed", finished_at=finished_at, error_text=str(exc))
             with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    "UPDATE jobs SET status = 'failed', finished_at = ?, error_text = ? WHERE id = ?",
-                    (finished_at, str(exc), job_id),
-                )
                 if schedule_id is not None:
                     conn.execute(
                         "UPDATE schedules SET last_run_status = 'failed', updated_at = ? WHERE id = ?",
@@ -831,22 +805,16 @@ class RankingBackendService:
     def _run_job_step(self, job_id: int, step_name: str, command: list[str]) -> str:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         command_text = " ".join(command)
-        with connect(self.settings.db_path) as conn:
-            step_order = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(step_order), 0) + 1 FROM job_steps WHERE job_id = ?",
-                    (job_id,),
-                ).fetchone()[0]
-            )
-            cursor = conn.execute(
-                """
-                INSERT INTO job_steps (
-                    job_id, step_order, step_name, status, command, started_at
-                ) VALUES (?, ?, ?, 'running', ?, ?)
-                """,
-                (job_id, step_order, step_name, command_text, started_at),
-            )
-            step_id = int(cursor.lastrowid)
+        step_order = next_job_step_order(self.settings.db_path, job_id)
+        step_id = create_job_step(
+            self.settings.db_path,
+            job_id=job_id,
+            step_order=step_order,
+            step_name=step_name,
+            status="running",
+            command=command_text,
+            started_at=started_at,
+        )
 
         child_env = os.environ.copy()
         child_env.setdefault("PYTHONUNBUFFERED", "1")
@@ -864,82 +832,42 @@ class RankingBackendService:
         for line in proc.stdout:
             clean_line = line.rstrip("\n")
             lines.append(clean_line)
-            with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    """
-                    UPDATE job_steps
-                    SET log_output = COALESCE(log_output, '') ||
-                        CASE
-                          WHEN COALESCE(log_output, '') = '' THEN ''
-                          ELSE char(10)
-                        END ||
-                        ?
-                    WHERE id = ?
-                    """,
-                    (clean_line, step_id),
-                )
+            append_job_step_output(self.settings.db_path, step_id=step_id, line=clean_line)
         rc = proc.wait()
         combined_output = "\n".join(lines).strip()
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
         status = "succeeded" if rc == 0 else "failed"
         error_text = None if rc == 0 else (combined_output or f"Step failed: {step_name}")
 
-        with connect(self.settings.db_path) as conn:
-            conn.execute(
-                """
-                UPDATE job_steps
-                SET status = ?, finished_at = ?, log_output = ?, error_text = ?
-                WHERE id = ?
-                """,
-                (status, finished_at, combined_output, error_text, step_id),
-            )
-            conn.execute(
-                """
-                UPDATE jobs
-                SET log_output = COALESCE(log_output, '') ||
-                    CASE
-                      WHEN COALESCE(log_output, '') = '' THEN ''
-                      ELSE char(10) || char(10)
-                    END ||
-                    ?
-                WHERE id = ?
-                """,
-                (f"[{step_name}]\n{combined_output}".strip(), job_id),
-            )
+        update_job_step(
+            self.settings.db_path,
+            step_id=step_id,
+            status=status,
+            finished_at=finished_at,
+            log_output=combined_output,
+            error_text=error_text,
+        )
+        append_job_log(self.settings.db_path, job_id=job_id, section_name=step_name, content=combined_output)
         if rc != 0:
             raise RuntimeError(error_text or f"Step failed: {step_name}")
         return combined_output
 
     def _record_job_note(self, job_id: int, step_name: str, message: str) -> None:
         now = dt.datetime.now(dt.timezone.utc).isoformat()
-        with connect(self.settings.db_path) as conn:
-            step_order = int(
-                conn.execute(
-                    "SELECT COALESCE(MAX(step_order), 0) + 1 FROM job_steps WHERE job_id = ?",
-                    (job_id,),
-                ).fetchone()[0]
-            )
-            conn.execute(
-                """
-                INSERT INTO job_steps (
-                    job_id, step_order, step_name, status, command, started_at, finished_at, log_output
-                ) VALUES (?, ?, ?, 'succeeded', ?, ?, ?, ?)
-                """,
-                (job_id, step_order, step_name, message, now, now, message),
-            )
-            conn.execute(
-                """
-                UPDATE jobs
-                SET log_output = COALESCE(log_output, '') ||
-                    CASE
-                      WHEN COALESCE(log_output, '') = '' THEN ''
-                      ELSE char(10) || char(10)
-                    END ||
-                    ?
-                WHERE id = ?
-                """,
-                (f"[{step_name}]\n{message}".strip(), job_id),
-            )
+        step_order = next_job_step_order(self.settings.db_path, job_id)
+        create_job_step(
+            self.settings.db_path,
+            job_id=job_id,
+            step_order=step_order,
+            step_name=step_name,
+            status="succeeded",
+            command=message,
+            started_at=now,
+            finished_at=now,
+            log_output=message,
+            error_text=None,
+        )
+        append_job_log(self.settings.db_path, job_id=job_id, section_name=step_name, content=message)
 
     def _finalize_run_from_output(self, run_id: int, schedule_id: int | None, combined_output: str) -> None:
         artifacts = self._parse_run_output(combined_output)
