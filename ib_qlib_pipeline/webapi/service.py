@@ -19,6 +19,13 @@ from .db import connect, init_db, rows_to_dicts
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .portfolio_store import list_portfolio_runs
 from .run_store import ranking_df_to_rows
+from .schedule_store import (
+    create_schedule as create_schedule_record,
+    delete_schedule as delete_schedule_record,
+    get_schedule as get_schedule_record,
+    list_schedules as list_schedule_records,
+    update_schedule as update_schedule_record,
+)
 from .settings import Settings
 from ..ranking.ranking_loader import read_available_trading_days
 
@@ -49,100 +56,35 @@ class RankingBackendService:
             self._scheduler.shutdown(wait=False)
 
     def list_schedules(self) -> list[dict[str, Any]]:
-        with connect(self.settings.db_path) as conn:
-            rows = conn.execute("SELECT * FROM schedules ORDER BY hour, minute, id").fetchall()
-        return rows_to_dicts(rows)
+        return list_schedule_records(self.settings.db_path)
 
     def create_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
-        now = dt.datetime.now(dt.timezone.utc).isoformat()
-        schedule_type = str(payload.get("schedule_type") or "ranking")
-        with connect(self.settings.db_path) as conn:
-            cursor = conn.execute(
-                """
-                INSERT INTO schedules (
-                    name, schedule_type, enabled, timezone, day_of_week, hour, minute,
-                    client_id, lookback_days, workflow_base, pipeline_start_date,
-                    pipeline_include_portfolio, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    payload["name"],
-                    schedule_type,
-                    1 if payload["enabled"] else 0,
-                    payload["timezone"],
-                    payload["day_of_week"],
-                    payload["hour"],
-                    payload["minute"],
-                    payload["client_id"],
-                    payload["lookback_days"],
-                    payload.get("workflow_base") or self.settings.default_workflow_base,
-                    payload.get("pipeline_start_date"),
-                    1 if bool(payload.get("pipeline_include_portfolio", True)) else 0,
-                    now,
-                    now,
-                ),
-            )
-            schedule_id = int(cursor.lastrowid)
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        row = create_schedule_record(
+            self.settings.db_path,
+            payload,
+            self.settings.default_workflow_base,
+        )
         self.reload_schedule_jobs()
-        assert row is not None
-        return dict(row)
+        return row
 
     def update_schedule(self, schedule_id: int, payload: dict[str, Any]) -> dict[str, Any]:
-        if not payload:
-            return self.get_schedule(schedule_id)
-        allowed = {
-            "name",
-            "schedule_type",
-            "enabled",
-            "timezone",
-            "day_of_week",
-            "hour",
-            "minute",
-            "client_id",
-            "lookback_days",
-            "workflow_base",
-            "pipeline_start_date",
-            "pipeline_include_portfolio",
-        }
-        assignments = []
-        params: list[Any] = []
-        for key, value in payload.items():
-            if key not in allowed or value is None:
-                continue
-            assignments.append(f"{key} = ?")
-            if key in {"enabled", "pipeline_include_portfolio"}:
-                params.append(1 if value else 0)
-            else:
-                params.append(value)
-        if not assignments:
-            return self.get_schedule(schedule_id)
-        params.extend([dt.datetime.now(dt.timezone.utc).isoformat(), schedule_id])
-        with connect(self.settings.db_path) as conn:
-            cursor = conn.execute(
-                f"UPDATE schedules SET {', '.join(assignments)}, updated_at = ? WHERE id = ?",
-                tuple(params),
-            )
-            if cursor.rowcount == 0:
-                raise NotFoundError(f"Schedule {schedule_id} not found")
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        row = update_schedule_record(self.settings.db_path, schedule_id, payload)
+        if row is None:
+            raise NotFoundError(f"Schedule {schedule_id} not found")
         self.reload_schedule_jobs()
-        assert row is not None
-        return dict(row)
+        return row
 
     def delete_schedule(self, schedule_id: int) -> None:
-        with connect(self.settings.db_path) as conn:
-            cursor = conn.execute("DELETE FROM schedules WHERE id = ?", (schedule_id,))
-            if cursor.rowcount == 0:
-                raise NotFoundError(f"Schedule {schedule_id} not found")
+        deleted = delete_schedule_record(self.settings.db_path, schedule_id)
+        if not deleted:
+            raise NotFoundError(f"Schedule {schedule_id} not found")
         self.reload_schedule_jobs()
 
     def get_schedule(self, schedule_id: int) -> dict[str, Any]:
-        with connect(self.settings.db_path) as conn:
-            row = conn.execute("SELECT * FROM schedules WHERE id = ?", (schedule_id,)).fetchone()
+        row = get_schedule_record(self.settings.db_path, schedule_id)
         if row is None:
             raise NotFoundError(f"Schedule {schedule_id} not found")
-        return dict(row)
+        return row
 
     def list_runs(
         self,
