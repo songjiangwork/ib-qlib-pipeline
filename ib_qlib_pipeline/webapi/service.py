@@ -38,6 +38,7 @@ from .run_store import (
     latest_backfill_signal_date_for_model,
     list_ranking_dates as list_ranking_date_records,
     list_runs as list_run_records,
+    mark_run_running,
     mark_run_failed as mark_run_failed_record,
     ranking_df_to_rows,
 )
@@ -564,16 +565,18 @@ class RankingBackendService:
     def _execute_run(self, run_id: int, schedule_id: int | None, command: list[str]) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()
         try:
-            with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    "UPDATE runs SET status = 'running', started_at = ? WHERE id = ?",
-                    (started_at, run_id),
+            mark_run_running(
+                self.settings.db_path,
+                run_id,
+                started_at=started_at,
+            )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=started_at,
+                    last_run_status="running",
                 )
-                if schedule_id is not None:
-                    conn.execute(
-                        "UPDATE schedules SET last_run_status = 'running', updated_at = ? WHERE id = ?",
-                        (started_at, schedule_id),
-                    )
 
             proc = subprocess.run(
                 command,

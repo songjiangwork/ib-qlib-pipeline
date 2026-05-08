@@ -142,6 +142,25 @@ def create_queued_run(
         session.close()
 
 
+def mark_run_running(
+    db_path: Path,
+    run_id: int,
+    *,
+    started_at: str,
+) -> None:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        run = session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = "running"
+        run.started_at = started_at
+        session.commit()
+    finally:
+        session.close()
+
+
 def finalize_succeeded_run(
     *,
     db_path: Path,

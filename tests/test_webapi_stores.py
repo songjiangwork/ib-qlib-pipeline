@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pandas as pd
@@ -286,6 +287,110 @@ class StoreTestCase(unittest.TestCase):
         finally:
             if ranking_csv.exists():
                 ranking_csv.unlink()
+
+    def test_service_execute_run_success_updates_run_and_schedule(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        run_id = service._create_run_record(
+            schedule_id=schedule["id"],
+            trigger_source="schedule",
+            client_id=151,
+            lookback_days=7,
+            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+        )
+        ranking_csv = self.project_root / "tmp_test_execute_run.csv"
+        try:
+            pd.DataFrame(
+                [
+                    {
+                        "rank": 1,
+                        "symbol": "AAPL",
+                        "score": 0.12,
+                        "percentile": 99.0,
+                        "close": 210.0,
+                        "signal_date": "2026-05-06",
+                    }
+                ]
+            ).to_csv(ranking_csv, index=False)
+            output = "\n".join(
+                [
+                    f"[ok] ranking exported: {ranking_csv}",
+                    "[ok] html report exported: reports/test.html",
+                    "[ok] signal_date=2026-05-06 rows=1 missing_close=0",
+                    "[ok] experiment_id=exp-test recorder_id=rec-test",
+                ]
+            )
+            proc = SimpleNamespace(returncode=0, stdout=output, stderr="")
+            service._run_lock.acquire()
+            with patch("ib_qlib_pipeline.webapi.service.subprocess.run", return_value=proc):
+                service._execute_run(run_id, schedule["id"], ["dummy"])
+
+            run = service.get_run(run_id)
+            updated_schedule = get_schedule(self.db_path, schedule["id"])
+            recs = service.get_run_recommendations(run_id)
+            self.assertEqual("succeeded", run["status"])
+            self.assertEqual("succeeded", updated_schedule["last_run_status"])
+            self.assertEqual(1, len(recs))
+            self.assertFalse(service._run_lock.locked())
+        finally:
+            if ranking_csv.exists():
+                ranking_csv.unlink()
+
+    def test_service_execute_run_failure_updates_run_and_schedule(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        run_id = service._create_run_record(
+            schedule_id=schedule["id"],
+            trigger_source="schedule",
+            client_id=151,
+            lookback_days=7,
+            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+        )
+        proc = SimpleNamespace(returncode=1, stdout="", stderr="boom")
+        service._run_lock.acquire()
+        with patch("ib_qlib_pipeline.webapi.service.subprocess.run", return_value=proc):
+            service._execute_run(run_id, schedule["id"], ["dummy"])
+
+        run = service.get_run(run_id)
+        updated_schedule = get_schedule(self.db_path, schedule["id"])
+        self.assertEqual("failed", run["status"])
+        self.assertEqual("boom", run["error_text"])
+        self.assertEqual("failed", updated_schedule["last_run_status"])
+        self.assertFalse(service._run_lock.locked())
 
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
