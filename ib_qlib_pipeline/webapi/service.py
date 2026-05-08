@@ -33,6 +33,7 @@ from .portfolio_store import list_portfolio_runs
 from .run_store import (
     get_run as get_run_record,
     get_run_recommendations as get_run_recommendation_records,
+    list_ranking_dates as list_ranking_date_records,
     list_runs as list_run_records,
     ranking_df_to_rows,
 )
@@ -205,40 +206,13 @@ class RankingBackendService:
         query: str | None = None,
         model_id: int | None = None,
     ) -> dict[str, Any]:
-        where = "WHERE r.trigger_source = 'backfill' AND r.signal_date IS NOT NULL"
-        params: list[Any] = []
-        if query:
-            where += " AND r.signal_date LIKE ?"
-            params.append(f"%{query}%")
-        if model_id is not None:
-            where += " AND r.model_id = ?"
-            params.append(model_id)
-
-        count_query = f"""
-            SELECT COUNT(*)
-            FROM runs r
-            {where}
-        """
-        list_query = f"""
-            SELECT r.id AS run_id, r.signal_date, r.row_count,
-                   m.id AS model_id, m.key AS model_key, m.name AS model_name
-            FROM runs r
-            LEFT JOIN models m ON m.id = r.model_id
-            {where}
-            ORDER BY r.signal_date DESC
-            LIMIT ? OFFSET ?
-        """
-        with connect(self.settings.db_path) as conn:
-            total = int(conn.execute(count_query, tuple(params)).fetchone()[0])
-            rows = conn.execute(list_query, tuple([*params, limit, offset])).fetchall()
-        items = [dict(row) for row in rows]
-        next_offset = offset + len(items)
-        return {
-            "items": items,
-            "total": total,
-            "has_more": next_offset < total,
-            "next_offset": next_offset,
-        }
+        return list_ranking_date_records(
+            self.settings.db_path,
+            limit=limit,
+            offset=offset,
+            query=query,
+            model_id=model_id,
+        )
 
     def get_run(self, run_id: int) -> dict[str, Any]:
         row = get_run_record(self.settings.db_path, run_id)

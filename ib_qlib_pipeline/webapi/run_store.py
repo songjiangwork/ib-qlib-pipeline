@@ -245,3 +245,52 @@ def get_run_recommendations(db_path: Path, run_id: int) -> list[dict[str, Any]]:
         ]
     finally:
         session.close()
+
+
+def list_ranking_dates(
+    db_path: Path,
+    *,
+    limit: int = 20,
+    offset: int = 0,
+    query: str | None = None,
+    model_id: int | None = None,
+) -> dict[str, Any]:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        base_query = (
+            select(
+                Run.id.label("run_id"),
+                Run.signal_date,
+                Run.row_count,
+                ModelRef.id.label("model_id"),
+                ModelRef.key.label("model_key"),
+                ModelRef.name.label("model_name"),
+            )
+            .select_from(Run)
+            .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+            .where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))
+        )
+        count_query = select(Run.id).where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))
+        if query:
+            like_value = f"%{query}%"
+            base_query = base_query.where(Run.signal_date.like(like_value))
+            count_query = count_query.where(Run.signal_date.like(like_value))
+        if model_id is not None:
+            base_query = base_query.where(Run.model_id == model_id)
+            count_query = count_query.where(Run.model_id == model_id)
+
+        total = len(session.execute(count_query).all())
+        rows = session.execute(
+            base_query.order_by(Run.signal_date.desc()).limit(limit).offset(offset)
+        ).all()
+        items = [dict(row._mapping) for row in rows]
+        next_offset = offset + len(items)
+        return {
+            "items": items,
+            "total": total,
+            "has_more": next_offset < total,
+            "next_offset": next_offset,
+        }
+    finally:
+        session.close()
