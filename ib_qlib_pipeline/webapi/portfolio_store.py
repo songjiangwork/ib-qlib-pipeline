@@ -303,6 +303,19 @@ def list_portfolio_runs(db_path: Path) -> list[dict[str, Any]]:
     return [_normalize_summary_row(row) for row in rows]
 
 
+def latest_portfolio_run_for_model(db_path: Path, model_id: int) -> dict[str, Any] | None:
+    with _session_for_db(db_path) as session:
+        row = session.execute(
+            _portfolio_summary_query()
+            .having(func.min(Run.model_id) == model_id, func.max(Run.model_id) == model_id)
+            .order_by(PortfolioRun.created_at.desc())
+            .limit(1)
+        ).first()
+    if row is None:
+        return None
+    return _normalize_summary_row(row)
+
+
 def get_portfolio_run(db_path: Path, portfolio_run_id: int) -> dict[str, Any] | None:
     with _session_for_db(db_path) as session:
         row = session.execute(

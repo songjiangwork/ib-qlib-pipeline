@@ -294,3 +294,25 @@ def list_ranking_dates(
         }
     finally:
         session.close()
+
+
+def latest_backfill_signal_date_for_model(db_path: Path, model_id: int) -> dt.date | None:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        latest_signal = session.execute(
+            select(Run.signal_date)
+            .where(
+                Run.status == "succeeded",
+                Run.trigger_source == "backfill",
+                Run.model_id == model_id,
+                Run.signal_date.is_not(None),
+            )
+            .order_by(Run.signal_date.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if not latest_signal:
+            return None
+        return dt.date.fromisoformat(str(latest_signal))
+    finally:
+        session.close()

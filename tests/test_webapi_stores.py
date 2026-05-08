@@ -380,6 +380,51 @@ class StoreTestCase(unittest.TestCase):
         self.assertTrue(lgb["portfolio_ready_for_trade_date"])
         self.assertEqual("2026-05-05", lgb["expected_portfolio_end_signal_date"])
 
+    def test_service_latest_model_state_helpers(self) -> None:
+        service = self._make_service()
+        run_id = self._insert_completed_run(signal_date="2026-05-06", model_id=1)
+        create_portfolio_run(
+            db_path=self.db_path,
+            name="lgb-run-latest",
+            strategy="top10-hold20",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            start_signal_date="2026-05-01",
+            end_signal_date="2026-05-05",
+            notes="test",
+        )
+        portfolio_run_id = create_portfolio_run(
+            db_path=self.db_path,
+            name="lgb-run-newest",
+            strategy="top10-hold20",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            start_signal_date="2026-05-02",
+            end_signal_date="2026-05-06",
+            notes="test",
+        )
+        insert_portfolio_lot(
+            db_path=self.db_path,
+            portfolio_run_id=portfolio_run_id,
+            symbol="AAPL",
+            entry_run_id=run_id,
+            entry_signal_date="2026-05-06",
+            entry_trade_date="2026-05-07",
+            entry_rank=1,
+            entry_price_open=200.0,
+            shares=50,
+            target_notional=10000.0,
+        )
+
+        latest_signal = service._latest_backfill_signal_date_for_model(1)
+        latest_portfolio = service._latest_portfolio_run_for_model(1)
+
+        self.assertEqual(pd.Timestamp("2026-05-06").date(), latest_signal)
+        self.assertIsNotNone(latest_portfolio)
+        self.assertEqual(portfolio_run_id, latest_portfolio["id"])
+
     def test_service_list_ranking_dates_filters_and_pagination(self) -> None:
         service = self._make_service()
         self._insert_completed_run(signal_date="2026-05-05", model_id=1)

@@ -29,10 +29,11 @@ from .job_store import (
     update_job_step,
 )
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
-from .portfolio_store import list_portfolio_runs
+from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
     get_run as get_run_record,
     get_run_recommendations as get_run_recommendation_records,
+    latest_backfill_signal_date_for_model,
     list_ranking_dates as list_ranking_date_records,
     list_runs as list_run_records,
     ranking_df_to_rows,
@@ -937,22 +938,7 @@ class RankingBackendService:
         return prior_days[-1]
 
     def _latest_backfill_signal_date_for_model(self, model_id: int) -> dt.date | None:
-        with connect(self.settings.db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT MAX(signal_date) AS latest_signal_date
-                FROM runs
-                WHERE status = 'succeeded'
-                  AND trigger_source = 'backfill'
-                  AND model_id = ?
-                  AND signal_date IS NOT NULL
-                """,
-                (model_id,),
-            ).fetchone()
-        latest_signal = row["latest_signal_date"] if row is not None else None
-        if not latest_signal:
-            return None
-        return dt.date.fromisoformat(str(latest_signal))
+        return latest_backfill_signal_date_for_model(self.settings.db_path, model_id)
 
     def _missing_signal_days_for_model(
         self,
@@ -967,10 +953,7 @@ class RankingBackendService:
         return [day for day in trading_days if start_day <= day <= trade_date]
 
     def _latest_portfolio_run_for_model(self, model_id: int) -> dict[str, Any] | None:
-        for row in list_portfolio_runs(self.settings.db_path):
-            if row.get("model_id") == model_id:
-                return row
-        return None
+        return latest_portfolio_run_for_model(self.settings.db_path, model_id)
 
     def _mark_run_failed(self, run_id: int, schedule_id: int | None, error_text: str) -> None:
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
