@@ -4,7 +4,6 @@ import datetime as dt
 import json
 import os
 import re
-import sqlite3
 import subprocess
 import threading
 from pathlib import Path
@@ -15,7 +14,7 @@ import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from .db import connect, init_db, rows_to_dicts
+from .db import init_db
 from .job_store import (
     append_job_log,
     append_job_step_output,
@@ -31,6 +30,7 @@ from .job_store import (
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
+    backfill_legacy_run_models as backfill_legacy_run_models_record,
     create_queued_run,
     finalize_succeeded_run,
     get_run as get_run_record,
@@ -336,72 +336,6 @@ class RankingBackendService:
             schedule_id=schedule_id,
         )
 
-    def _start_run(
-        self,
-        schedule_id: int | None,
-        trigger_source: str,
-        client_id: int,
-        lookback_days: int,
-        workflow_base: str,
-    ) -> dict[str, Any]:
-        if not self._run_lock.acquire(blocking=False):
-            raise BusyError("A ranking run is already in progress")
-        now = dt.datetime.now(dt.timezone.utc).isoformat()
-        model_id = resolve_or_create_model_for_workflow(
-            self.settings.db_path,
-            self.settings.project_root,
-            workflow_base,
-        )
-        command = [
-            str(self.settings.run_script_path),
-            "--client-id",
-            str(client_id),
-            "--lookback-days",
-            str(lookback_days),
-            "--workflow-base",
-            workflow_base,
-        ]
-        try:
-            with connect(self.settings.db_path) as conn:
-                cursor = conn.execute(
-                    """
-                    INSERT INTO runs (
-                        schedule_id, model_id, trigger_source, status, client_id, lookback_days,
-                        workflow_base, command, created_at
-                    ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        schedule_id,
-                        model_id,
-                        trigger_source,
-                        client_id,
-                        lookback_days,
-                        workflow_base,
-                        " ".join(command),
-                        now,
-                    ),
-                )
-                run_id = int(cursor.lastrowid)
-                if schedule_id is not None:
-                    conn.execute(
-                        """
-                        UPDATE schedules
-                        SET last_triggered_at = ?, last_run_id = ?, last_run_status = 'queued', updated_at = ?
-                        WHERE id = ?
-                        """,
-                        (now, run_id, now, schedule_id),
-                    )
-            thread = threading.Thread(
-                target=self._execute_run,
-                args=(run_id, schedule_id, command),
-                daemon=True,
-            )
-            thread.start()
-            return self.get_run(run_id)
-        except Exception:
-            self._run_lock.release()
-            raise
-
     def _start_job(
         self,
         *,
@@ -494,15 +428,10 @@ class RankingBackendService:
             self.settings.project_root,
             "examples/workflow_us_lgb_2020_port.yaml",
         )
-        with connect(self.settings.db_path) as conn:
-            conn.execute(
-                """
-                UPDATE runs
-                SET model_id = ?
-                WHERE model_id IS NULL
-                """,
-                (lgb_model_id,),
-            )
+        backfill_legacy_run_models_record(
+            self.settings.db_path,
+            default_model_id=lgb_model_id,
+        )
 
     def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any], schedule_id: int | None) -> None:
         started_at = dt.datetime.now(dt.timezone.utc).isoformat()

@@ -8,6 +8,8 @@ from unittest.mock import patch
 
 import pandas as pd
 
+from ib_qlib_pipeline.dborm.models import Run
+from ib_qlib_pipeline.dborm.session import create_session_factory_for_path
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.job_store import (
     append_job_log,
@@ -213,6 +215,34 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual("failed", run["status"])
         self.assertEqual("boom", run["error_text"])
         self.assertEqual("failed", updated_schedule["last_run_status"])
+
+    def test_service_backfill_legacy_run_models_assigns_default_lgb(self) -> None:
+        service = self._make_service()
+        session = create_session_factory_for_path(self.db_path)()
+        try:
+            legacy_run = Run(
+                schedule_id=None,
+                model_id=None,
+                trigger_source="manual",
+                status="queued",
+                client_id=151,
+                lookback_days=7,
+                workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+                command="cmd",
+                created_at="2026-05-07T00:00:00+00:00",
+            )
+            session.add(legacy_run)
+            session.commit()
+            session.refresh(legacy_run)
+            run_id = int(legacy_run.id)
+        finally:
+            session.close()
+
+        service._backfill_legacy_run_models()
+
+        run = service.get_run(run_id)
+        self.assertEqual(get_model_by_key(self.db_path, "lgb")["id"], run["model_id"])
+        self.assertEqual("LightGBM_Default", run["model_name"])
 
     def test_service_start_job_marks_schedule_queued(self) -> None:
         service = self._make_service()

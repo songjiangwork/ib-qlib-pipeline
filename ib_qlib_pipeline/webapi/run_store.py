@@ -444,3 +444,22 @@ def mark_run_failed(
         session.commit()
     finally:
         session.close()
+
+
+def backfill_legacy_run_models(
+    db_path: Path,
+    *,
+    default_model_id: int,
+) -> int:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        count = (
+            session.query(Run)
+            .filter(Run.model_id.is_(None))
+            .update({Run.model_id: default_model_id}, synchronize_session=False)
+        )
+        session.commit()
+        return int(count or 0)
+    finally:
+        session.close()
