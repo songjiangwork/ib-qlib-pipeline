@@ -28,6 +28,7 @@ from .job_store import (
     update_job_step,
 )
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
+from .operations_service import build_operations_summary, build_scheduled_job_request
 from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
     backfill_legacy_run_models as backfill_legacy_run_models_record,
@@ -132,41 +133,13 @@ class RankingBackendService:
         models = list_models(self.settings.db_path)
         portfolio_runs = list_portfolio_runs(self.settings.db_path)
         runs = self.list_runs(limit=500, status="succeeded")
-        items: list[dict[str, Any]] = []
-        for model in models:
-            model_runs = [row for row in runs if row.get("model_id") == model["id"]]
-            latest_ranking = next(
-                (
-                    row
-                    for row in model_runs
-                    if row.get("trigger_source") == "backfill" and row.get("signal_date") is not None
-                ),
-                None,
-            )
-            portfolio_run = next((row for row in portfolio_runs if row.get("model_id") == model["id"]), None)
-            ranking_signal_date = str(latest_ranking["signal_date"]) if latest_ranking else None
-            portfolio_end = str(portfolio_run["end_signal_date"]) if portfolio_run and portfolio_run.get("end_signal_date") else None
-            items.append(
-                {
-                    "model_id": model["id"],
-                    "model_key": model["key"],
-                    "model_name": model["name"],
-                    "workflow_base": model.get("workflow_base"),
-                    "latest_ranking_run_id": latest_ranking.get("id") if latest_ranking else None,
-                    "latest_ranking_signal_date": ranking_signal_date,
-                    "ranking_ready_for_trade_date": ranking_signal_date == trade_date,
-                    "portfolio_run_id": portfolio_run.get("id") if portfolio_run else None,
-                    "portfolio_run_name": portfolio_run.get("name") if portfolio_run else None,
-                    "portfolio_end_signal_date": portfolio_end,
-                    "portfolio_ready_for_trade_date": portfolio_end == expected_portfolio_end,
-                    "expected_portfolio_end_signal_date": expected_portfolio_end,
-                }
-            )
-        return {
-            "trade_date": trade_date,
-            "expected_portfolio_end_signal_date": expected_portfolio_end,
-            "models": items,
-        }
+        return build_operations_summary(
+            models=models,
+            portfolio_runs=portfolio_runs,
+            runs=runs,
+            trade_date=trade_date,
+            expected_portfolio_end_signal_date=expected_portfolio_end,
+        )
 
     def get_job(self, job_id: int) -> dict[str, Any]:
         item = get_job_record(self.settings.db_path, job_id)
@@ -300,40 +273,21 @@ class RankingBackendService:
 
     def _trigger_scheduled_run(self, schedule_id: int) -> None:
         schedule = self.get_schedule(schedule_id)
-        schedule_type = str(schedule.get("schedule_type") or "ranking")
-        if schedule_type == "daily_close_pipeline":
-            now_local = dt.datetime.now(ZoneInfo(str(schedule["timezone"])))
-            trade_date = now_local.date().isoformat()
-            pipeline_start_date = schedule.get("pipeline_start_date")
-            if not pipeline_start_date:
-                pipeline_start_date = (now_local.date() - dt.timedelta(days=int(schedule["lookback_days"]))).isoformat()
-            self._start_job(
-                job_type="scheduled_daily_close_pipeline",
-                title=f"Scheduled daily close pipeline #{schedule_id} ({trade_date})",
-                payload={
-                    "schedule_id": schedule_id,
-                    "trade_date": trade_date,
-                    "client_id": int(schedule["client_id"]),
-                    "start_date": str(pipeline_start_date),
-                    "include_portfolio": bool(schedule.get("pipeline_include_portfolio")),
-                },
-                target=self._execute_daily_close_pipeline_job,
-                schedule_id=schedule_id,
-            )
-            return
-
+        request = build_scheduled_job_request(
+            schedule,
+            now_local_date=dt.datetime.now(ZoneInfo(str(schedule["timezone"]))).date(),
+        )
+        target = (
+            self._execute_daily_close_pipeline_job
+            if request["target_name"] == "daily_close_pipeline"
+            else self._execute_ranking_run_job
+        )
         self._start_job(
-            job_type="scheduled_ranking_run",
-            title=f"Scheduled ranking run #{schedule_id} ({schedule['workflow_base']})",
-            payload={
-                "schedule_id": schedule_id,
-                "trigger_source": "schedule",
-                "client_id": int(schedule["client_id"]),
-                "lookback_days": int(schedule["lookback_days"]),
-                "workflow_base": str(schedule["workflow_base"]),
-            },
-            target=self._execute_ranking_run_job,
-            schedule_id=schedule_id,
+            job_type=str(request["job_type"]),
+            title=str(request["title"]),
+            payload=dict(request["payload"]),
+            target=target,
+            schedule_id=int(request["schedule_id"]),
         )
 
     def _start_job(

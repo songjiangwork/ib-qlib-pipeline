@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import tempfile
 import unittest
 from pathlib import Path
@@ -873,6 +874,187 @@ class StoreTestCase(unittest.TestCase):
             kwargs = target.call_args.kwargs
             self.assertEqual("scheduled_ranking_run", kwargs["job_type"])
             self.assertEqual(9, kwargs["schedule_id"])
+
+    def test_service_reload_schedule_jobs_only_registers_enabled(self) -> None:
+        service = self._make_service()
+        enabled = create_schedule(
+            self.db_path,
+            {
+                "name": "close",
+                "schedule_type": "daily_close_pipeline",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": "2026-05-01",
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        create_schedule(
+            self.db_path,
+            {
+                "name": "disabled",
+                "schedule_type": "ranking",
+                "enabled": False,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 15,
+                "minute": 10,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        fake_scheduler = SimpleNamespace(
+            get_jobs=lambda: [SimpleNamespace(id="old-job")],
+            remove_job=unittest.mock.Mock(),
+            add_job=unittest.mock.Mock(),
+        )
+        service._scheduler = fake_scheduler
+
+        service.reload_schedule_jobs()
+
+        fake_scheduler.remove_job.assert_called_once_with("old-job")
+        fake_scheduler.add_job.assert_called_once()
+        kwargs = fake_scheduler.add_job.call_args.kwargs
+        self.assertEqual(f"schedule-{enabled['id']}", kwargs["id"])
+        self.assertEqual([enabled["id"]], kwargs["args"])
+
+    def test_service_trigger_scheduled_run_daily_close_builds_expected_job(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "close",
+                "schedule_type": "daily_close_pipeline",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        fake_now = dt.datetime(2026, 5, 7, 14, 40, tzinfo=dt.timezone.utc)
+        with (
+            patch("ib_qlib_pipeline.webapi.service.dt.datetime") as mock_datetime,
+            patch.object(service, "_start_job", return_value={"id": 301}) as start_job,
+        ):
+            mock_datetime.now.return_value = fake_now
+            service._trigger_scheduled_run(schedule["id"])
+
+        kwargs = start_job.call_args.kwargs
+        self.assertEqual("scheduled_daily_close_pipeline", kwargs["job_type"])
+        self.assertEqual(schedule["id"], kwargs["schedule_id"])
+        self.assertEqual(schedule["id"], kwargs["payload"]["schedule_id"])
+        self.assertEqual(True, kwargs["payload"]["include_portfolio"])
+
+    def test_service_trigger_scheduled_run_ranking_builds_expected_job(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        with patch.object(service, "_start_job", return_value={"id": 302}) as start_job:
+            service._trigger_scheduled_run(schedule["id"])
+
+        kwargs = start_job.call_args.kwargs
+        self.assertEqual("scheduled_ranking_run", kwargs["job_type"])
+        self.assertEqual(schedule["id"], kwargs["schedule_id"])
+        self.assertEqual("schedule", kwargs["payload"]["trigger_source"])
+        self.assertEqual(schedule["workflow_base"], kwargs["payload"]["workflow_base"])
+
+    def test_service_execute_daily_close_pipeline_job_orchestrates_models(self) -> None:
+        service = self._make_service()
+        models = [
+            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"},
+            {"id": 2, "key": "xgb", "name": "XGBoost_Default", "workflow_base": "examples/workflow_us_xgb_2020_port.yaml"},
+        ]
+        payload = {
+            "trade_date": "2026-05-06",
+            "client_id": 151,
+            "start_date": "2026-05-01",
+            "include_portfolio": True,
+        }
+
+        with (
+            patch("ib_qlib_pipeline.webapi.service.list_models", return_value=models),
+            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", return_value=[dt.date(2026, 5, 5), dt.date(2026, 5, 6)]),
+            patch.object(service, "_missing_signal_days_for_model", side_effect=[[dt.date(2026, 5, 5)], [dt.date(2026, 5, 5), dt.date(2026, 5, 6)]]),
+            patch.object(service, "_latest_portfolio_run_for_model", side_effect=[{"id": 11, "model_id": 1}, None]),
+            patch.object(service, "_run_job_step", return_value="ok") as run_job_step,
+            patch.object(service, "_record_job_note") as record_note,
+        ):
+            service._execute_daily_close_pipeline_job(901, payload)
+
+        called_steps = [call.args[1] for call in run_job_step.call_args_list]
+        self.assertEqual(
+            [
+                "refresh_data",
+                "backfill_lgb_2026-05-05",
+                "backfill_xgb_2026-05-05",
+                "backfill_xgb_2026-05-06",
+                "append_lgb_portfolio",
+            ],
+            called_steps,
+        )
+        record_note.assert_called_once()
+        self.assertIn("append_xgb_portfolio", record_note.call_args.kwargs["step_name"])
+
+    def test_service_execute_daily_close_pipeline_job_skips_portfolio_when_disabled(self) -> None:
+        service = self._make_service()
+        models = [
+            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"},
+        ]
+        payload = {
+            "trade_date": "2026-05-06",
+            "client_id": 151,
+            "start_date": "2026-05-01",
+            "include_portfolio": False,
+        }
+
+        with (
+            patch("ib_qlib_pipeline.webapi.service.list_models", return_value=models),
+            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", return_value=[dt.date(2026, 5, 6)]),
+            patch.object(service, "_missing_signal_days_for_model", return_value=[dt.date(2026, 5, 6)]),
+            patch.object(service, "_run_job_step", return_value="ok") as run_job_step,
+            patch.object(service, "_latest_portfolio_run_for_model") as latest_portfolio,
+        ):
+            service._execute_daily_close_pipeline_job(902, payload)
+
+        called_steps = [call.args[1] for call in run_job_step.call_args_list]
+        self.assertEqual(["refresh_data", "backfill_lgb_2026-05-06"], called_steps)
+        latest_portfolio.assert_not_called()
 
 
 if __name__ == "__main__":
