@@ -213,6 +213,80 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual("boom", run["error_text"])
         self.assertEqual("failed", updated_schedule["last_run_status"])
 
+    def test_service_finalize_run_from_output_updates_run_and_recommendations(self) -> None:
+        service = self._make_service()
+        schedule = create_schedule(
+            self.db_path,
+            {
+                "name": "ranking",
+                "schedule_type": "ranking",
+                "enabled": True,
+                "timezone": "America/Denver",
+                "day_of_week": "mon-fri",
+                "hour": 14,
+                "minute": 40,
+                "client_id": 151,
+                "lookback_days": 7,
+                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+                "pipeline_start_date": None,
+                "pipeline_include_portfolio": True,
+            },
+            "examples/workflow_us_lgb_2020_port.yaml",
+        )
+        run_id = service._create_run_record(
+            schedule_id=schedule["id"],
+            trigger_source="schedule",
+            client_id=151,
+            lookback_days=7,
+            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+        )
+
+        ranking_csv = self.project_root / "tmp_test_finalize_ranking.csv"
+        try:
+            pd.DataFrame(
+                [
+                    {
+                        "rank": 1,
+                        "symbol": "AAPL",
+                        "score": 0.12,
+                        "percentile": 99.0,
+                        "close": 210.0,
+                        "signal_date": "2026-05-06",
+                    },
+                    {
+                        "rank": 2,
+                        "symbol": "MSFT",
+                        "score": 0.11,
+                        "percentile": 98.0,
+                        "close": 310.0,
+                        "signal_date": "2026-05-06",
+                    },
+                ]
+            ).to_csv(ranking_csv, index=False)
+
+            output = "\n".join(
+                [
+                    f"[ok] ranking exported: {ranking_csv}",
+                    "[ok] html report exported: reports/test.html",
+                    "[ok] signal_date=2026-05-06 rows=2 missing_close=0",
+                    "[ok] experiment_id=exp-test recorder_id=rec-test",
+                ]
+            )
+            service._finalize_run_from_output(run_id, schedule["id"], output)
+
+            run = service.get_run(run_id)
+            recs = service.get_run_recommendations(run_id)
+            updated_schedule = get_schedule(self.db_path, schedule["id"])
+            self.assertEqual("succeeded", run["status"])
+            self.assertEqual("2026-05-06", run["signal_date"])
+            self.assertEqual(2, run["row_count"])
+            self.assertEqual(2, len(recs))
+            self.assertEqual("AAPL", recs[0]["symbol"])
+            self.assertEqual("succeeded", updated_schedule["last_run_status"])
+        finally:
+            if ranking_csv.exists():
+                ranking_csv.unlink()
+
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
         portfolio_run_id = create_portfolio_run(

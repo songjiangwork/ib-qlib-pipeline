@@ -142,6 +142,58 @@ def create_queued_run(
         session.close()
 
 
+def finalize_succeeded_run(
+    *,
+    db_path: Path,
+    run_id: int,
+    ranking_df: pd.DataFrame,
+    signal_date: str,
+    ranking_csv_path: str,
+    html_report_path: str | None,
+    experiment_id: str,
+    recorder_id: str,
+    log_output: str,
+    finished_at: str | None = None,
+) -> None:
+    finished_at = finished_at or dt.datetime.now(dt.timezone.utc).isoformat()
+    recommendations = ranking_df_to_rows(ranking_df)
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        run = session.get(Run, run_id)
+        if run is None:
+            return
+        run.status = "succeeded"
+        run.finished_at = finished_at
+        run.signal_date = signal_date
+        run.ranking_csv_path = ranking_csv_path
+        run.html_report_path = html_report_path
+        run.experiment_id = experiment_id
+        run.recorder_id = recorder_id
+        run.row_count = len(recommendations)
+        run.log_output = log_output
+        run.error_text = None
+
+        session.query(Recommendation).filter(Recommendation.run_id == run_id).delete()
+        session.add_all(
+            [
+                Recommendation(
+                    run_id=run_id,
+                    rank=int(row["rank"]),
+                    symbol=str(row["symbol"]),
+                    score=float(row["score"]),
+                    percentile=float(row["percentile"]) if row["percentile"] is not None else None,
+                    entry_price=float(row["entry_price"]) if row["entry_price"] is not None else None,
+                    signal_date=str(row["signal_date"]),
+                )
+                for row in recommendations
+            ]
+        )
+        session.commit()
+    finally:
+        session.close()
+
+
 def list_runs(
     db_path: Path,
     *,

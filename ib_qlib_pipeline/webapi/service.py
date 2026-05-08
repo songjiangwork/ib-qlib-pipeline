@@ -32,6 +32,7 @@ from .model_store import ensure_default_models, get_model, list_models, resolve_
 from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
     create_queued_run,
+    finalize_succeeded_run,
     get_run as get_run_record,
     get_run_recommendations as get_run_recommendation_records,
     latest_backfill_signal_date_for_model,
@@ -592,59 +593,25 @@ class RankingBackendService:
             artifacts = self._parse_run_output(combined_output)
             ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
             finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-            recommendations = ranking_df_to_rows(ranking_df)
-
-            with connect(self.settings.db_path) as conn:
-                conn.execute(
-                    """
-                    UPDATE runs
-                    SET status = 'succeeded',
-                        finished_at = ?,
-                        signal_date = ?,
-                        ranking_csv_path = ?,
-                        html_report_path = ?,
-                        experiment_id = ?,
-                        recorder_id = ?,
-                        row_count = ?,
-                        log_output = ?,
-                        error_text = NULL
-                    WHERE id = ?
-                    """,
-                    (
-                        finished_at,
-                        artifacts["signal_date"],
-                        artifacts["ranking_csv_path"],
-                        artifacts["html_report_path"],
-                        artifacts["experiment_id"],
-                        artifacts["recorder_id"],
-                        len(recommendations),
-                        combined_output,
-                        run_id,
-                    ),
+            finalize_succeeded_run(
+                db_path=self.settings.db_path,
+                run_id=run_id,
+                ranking_df=ranking_df,
+                signal_date=artifacts["signal_date"],
+                ranking_csv_path=artifacts["ranking_csv_path"],
+                html_report_path=artifacts["html_report_path"],
+                experiment_id=artifacts["experiment_id"],
+                recorder_id=artifacts["recorder_id"],
+                log_output=combined_output,
+                finished_at=finished_at,
+            )
+            if schedule_id is not None:
+                update_schedule_run_state(
+                    self.settings.db_path,
+                    schedule_id,
+                    updated_at=finished_at,
+                    last_run_status="succeeded",
                 )
-                conn.executemany(
-                    """
-                    INSERT INTO recommendations (run_id, rank, symbol, score, percentile, entry_price, signal_date)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    [
-                        (
-                            run_id,
-                            int(row["rank"]),
-                            str(row["symbol"]),
-                            float(row["score"]),
-                            float(row["percentile"]) if row["percentile"] is not None else None,
-                            float(row["entry_price"]) if row["entry_price"] is not None else None,
-                            str(row["signal_date"]),
-                        )
-                        for row in recommendations
-                    ],
-                )
-                if schedule_id is not None:
-                    conn.execute(
-                        "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
-                        (finished_at, schedule_id),
-                    )
         except Exception as exc:  # noqa: BLE001
             self._mark_run_failed(run_id, schedule_id, str(exc))
         finally:
@@ -806,58 +773,25 @@ class RankingBackendService:
         artifacts = self._parse_run_output(combined_output)
         ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        recommendations = ranking_df_to_rows(ranking_df)
-        with connect(self.settings.db_path) as conn:
-            conn.execute(
-                """
-                UPDATE runs
-                SET status = 'succeeded',
-                    finished_at = ?,
-                    signal_date = ?,
-                    ranking_csv_path = ?,
-                    html_report_path = ?,
-                    experiment_id = ?,
-                    recorder_id = ?,
-                    row_count = ?,
-                    log_output = ?,
-                    error_text = NULL
-                WHERE id = ?
-                """,
-                (
-                    finished_at,
-                    artifacts["signal_date"],
-                    artifacts["ranking_csv_path"],
-                    artifacts["html_report_path"],
-                    artifacts["experiment_id"],
-                    artifacts["recorder_id"],
-                    len(recommendations),
-                    combined_output,
-                    run_id,
-                ),
+        finalize_succeeded_run(
+            db_path=self.settings.db_path,
+            run_id=run_id,
+            ranking_df=ranking_df,
+            signal_date=artifacts["signal_date"],
+            ranking_csv_path=artifacts["ranking_csv_path"],
+            html_report_path=artifacts["html_report_path"],
+            experiment_id=artifacts["experiment_id"],
+            recorder_id=artifacts["recorder_id"],
+            log_output=combined_output,
+            finished_at=finished_at,
+        )
+        if schedule_id is not None:
+            update_schedule_run_state(
+                self.settings.db_path,
+                schedule_id,
+                updated_at=finished_at,
+                last_run_status="succeeded",
             )
-            conn.executemany(
-                """
-                INSERT INTO recommendations (run_id, rank, symbol, score, percentile, entry_price, signal_date)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                [
-                    (
-                        run_id,
-                        int(row["rank"]),
-                        str(row["symbol"]),
-                        float(row["score"]),
-                        float(row["percentile"]) if row["percentile"] is not None else None,
-                        float(row["entry_price"]) if row["entry_price"] is not None else None,
-                        str(row["signal_date"]),
-                    )
-                    for row in recommendations
-                ],
-            )
-            if schedule_id is not None:
-                conn.execute(
-                    "UPDATE schedules SET last_run_status = 'succeeded', updated_at = ? WHERE id = ?",
-                    (finished_at, schedule_id),
-                )
 
     def _build_refresh_data_command(self, *, client_id: int, start_date: str) -> list[str]:
         python_bin = self.settings.project_root / ".venv" / "bin" / "python"
