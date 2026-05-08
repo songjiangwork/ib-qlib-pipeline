@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import pandas as pd
 
@@ -46,6 +47,8 @@ from ib_qlib_pipeline.webapi.schedule_store import (
     list_schedules,
     update_schedule,
 )
+from ib_qlib_pipeline.webapi.service import RankingBackendService
+from ib_qlib_pipeline.webapi.settings import Settings
 
 
 class StoreTestCase(unittest.TestCase):
@@ -89,6 +92,18 @@ class StoreTestCase(unittest.TestCase):
             recorder_id="rec1",
             log_output="ok",
         )
+
+    def _make_service(self) -> RankingBackendService:
+        settings = Settings(
+            project_root=self.project_root,
+            db_path=self.db_path,
+            timezone="America/Denver",
+            default_workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+            run_script_path=self.project_root / "run_daily_ranking.sh",
+            api_host="127.0.0.1",
+            api_port=8001,
+        )
+        return RankingBackendService(settings)
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)
@@ -258,6 +273,175 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(1, len(job["steps"]))
         self.assertEqual("succeeded", job["steps"][0]["status"])
         self.assertIn("[refresh_data]", job["log_output"])
+
+    def test_service_command_builders(self) -> None:
+        service = self._make_service()
+
+        refresh = service._build_refresh_data_command(client_id=151, start_date="2026-05-01")
+        backfill = service._build_backfill_command(
+            signal_date="2026-05-06",
+            workflow_base="examples/workflow_us_xgb_2020_port.yaml",
+            model_id=2,
+            client_id=151,
+        )
+        append = service._build_append_portfolio_command(
+            portfolio_run_id=42,
+            model_id=3,
+            end_date="2026-05-05",
+        )
+
+        self.assertEqual("run.py", refresh[1])
+        self.assertIn("--dump-bin", refresh)
+        self.assertEqual("backfill_rankings.py", backfill[1])
+        self.assertIn("--skip-existing-db", backfill)
+        self.assertIn("--model-id", backfill)
+        self.assertEqual("simulate_portfolio.py", append[1])
+        self.assertEqual(["--append-run-id", "42"], append[2:4])
+        self.assertTrue(append[-2:] == ["--model-id", "3"])
+
+    def test_service_previous_trading_day_and_missing_days(self) -> None:
+        service = self._make_service()
+        trading_days = [
+            pd.Timestamp("2026-05-01").date(),
+            pd.Timestamp("2026-05-04").date(),
+            pd.Timestamp("2026-05-05").date(),
+            pd.Timestamp("2026-05-06").date(),
+        ]
+
+        with patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", return_value=trading_days):
+            self.assertEqual(pd.Timestamp("2026-05-05").date(), service._previous_trading_day(pd.Timestamp("2026-05-06").date()))
+
+        self._insert_completed_run(signal_date="2026-05-05", model_id=1)
+        missing = service._missing_signal_days_for_model(
+            model_id=1,
+            trade_date=pd.Timestamp("2026-05-06").date(),
+            trading_days=trading_days,
+            fallback_start_date=pd.Timestamp("2026-05-01").date(),
+        )
+        self.assertEqual([pd.Timestamp("2026-05-06").date()], missing)
+
+    def test_service_operations_summary_ready_flags(self) -> None:
+        service = self._make_service()
+        run_id = self._insert_completed_run(signal_date="2026-05-06", model_id=1)
+        portfolio_run_id = create_portfolio_run(
+            db_path=self.db_path,
+            name="lgb-run",
+            strategy="top10-hold20",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            start_signal_date="2026-05-01",
+            end_signal_date="2026-05-05",
+            notes="test",
+        )
+        insert_portfolio_lot(
+            db_path=self.db_path,
+            portfolio_run_id=portfolio_run_id,
+            symbol="AAPL",
+            entry_run_id=run_id,
+            entry_signal_date="2026-05-05",
+            entry_trade_date="2026-05-06",
+            entry_rank=1,
+            entry_price_open=200.0,
+            shares=50,
+            target_notional=10000.0,
+        )
+
+        with patch(
+            "ib_qlib_pipeline.webapi.service.read_available_trading_days",
+            return_value=[
+                pd.Timestamp("2026-05-05").date(),
+                pd.Timestamp("2026-05-06").date(),
+            ],
+        ):
+            summary = service.get_operations_summary("2026-05-06")
+
+        lgb = next(item for item in summary["models"] if item["model_key"] == "lgb")
+        self.assertTrue(lgb["ranking_ready_for_trade_date"])
+        self.assertTrue(lgb["portfolio_ready_for_trade_date"])
+        self.assertEqual("2026-05-05", lgb["expected_portfolio_end_signal_date"])
+
+    def test_service_list_ranking_dates_filters_and_pagination(self) -> None:
+        service = self._make_service()
+        self._insert_completed_run(signal_date="2026-05-05", model_id=1)
+        self._insert_completed_run(signal_date="2026-05-06", model_id=1)
+        self._insert_completed_run(signal_date="2026-05-06", model_id=2)
+
+        all_lgb = service.list_ranking_dates(limit=10, offset=0, model_id=1)
+        paged = service.list_ranking_dates(limit=1, offset=0, model_id=1)
+        queried = service.list_ranking_dates(limit=10, offset=0, query="2026-05-05", model_id=1)
+
+        self.assertEqual(2, all_lgb["total"])
+        self.assertEqual(2, len(all_lgb["items"]))
+        self.assertEqual("2026-05-06", all_lgb["items"][0]["signal_date"])
+        self.assertTrue(paged["has_more"])
+        self.assertEqual(1, paged["next_offset"])
+        self.assertEqual(1, queried["total"])
+        self.assertEqual("2026-05-05", queried["items"][0]["signal_date"])
+
+    def test_service_trigger_methods_build_expected_jobs(self) -> None:
+        service = self._make_service()
+        with patch.object(service, "_start_job", return_value={"id": 123}) as start_job:
+            result = service.trigger_manual_run(
+                {"client_id": 151, "lookback_days": 7, "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"}
+            )
+            self.assertEqual({"id": 123}, result)
+            start_job.assert_called_once()
+            kwargs = start_job.call_args.kwargs
+            self.assertEqual("manual_ranking_run", kwargs["job_type"])
+            self.assertEqual("manual", kwargs["payload"]["trigger_source"])
+
+        with patch.object(service, "_start_job", return_value={"id": 124}) as start_job:
+            result = service.trigger_backfill_job({"signal_date": "2026-05-06", "model_id": 1, "client_id": 151})
+            self.assertEqual({"id": 124}, result)
+            kwargs = start_job.call_args.kwargs
+            self.assertEqual("backfill_ranking", kwargs["job_type"])
+            self.assertIn("LightGBM_Default", kwargs["title"])
+
+        with patch.object(service, "_start_job", return_value={"id": 125}) as start_job:
+            result = service.trigger_append_portfolio_job({"portfolio_run_id": 4, "model_id": 1, "end_date": "2026-05-06"})
+            self.assertEqual({"id": 125}, result)
+            kwargs = start_job.call_args.kwargs
+            self.assertEqual("append_portfolio", kwargs["job_type"])
+            self.assertEqual(4, kwargs["payload"]["portfolio_run_id"])
+
+    def test_service_retry_job_routes_to_correct_handler(self) -> None:
+        service = self._make_service()
+
+        with patch.object(service, "trigger_data_refresh_job", return_value={"id": 201}) as target:
+            job_id = create_job(
+                self.db_path,
+                job_type="refresh_data",
+                title="Refresh",
+                payload_json='{"start_date":"2026-05-01","client_id":151}',
+            )
+            result = service.retry_job(job_id)
+            self.assertEqual({"id": 201}, result)
+            target.assert_called_once_with({"start_date": "2026-05-01", "client_id": 151})
+
+        with patch.object(service, "trigger_daily_close_pipeline_job", return_value={"id": 202}) as target:
+            job_id = create_job(
+                self.db_path,
+                job_type="daily_close_pipeline",
+                title="Daily Close",
+                payload_json='{"trade_date":"2026-05-06","client_id":151,"start_date":"2026-05-01","include_portfolio":true}',
+            )
+            result = service.retry_job(job_id)
+            self.assertEqual({"id": 202}, result)
+            target.assert_called_once()
+
+        with patch.object(service, "_start_job", return_value={"id": 203}) as target:
+            job_id = create_job(
+                self.db_path,
+                job_type="scheduled_ranking_run",
+                title="Scheduled ranking",
+                payload_json='{"schedule_id":9,"trigger_source":"schedule","client_id":151,"lookback_days":7,"workflow_base":"examples/workflow_us_lgb_2020_port.yaml"}',
+            )
+            result = service.retry_job(job_id)
+            self.assertEqual({"id": 203}, result)
+            kwargs = target.call_args.kwargs
+            self.assertEqual("scheduled_ranking_run", kwargs["job_type"])
+            self.assertEqual(9, kwargs["schedule_id"])
 
 
 if __name__ == "__main__":
