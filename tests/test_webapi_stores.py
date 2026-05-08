@@ -122,6 +122,25 @@ class StoreTestCase(unittest.TestCase):
         run_id = self._insert_completed_run()
         self.assertGreater(run_id, 0)
 
+    def test_service_run_queries(self) -> None:
+        service = self._make_service()
+        first_run_id = self._insert_completed_run(signal_date="2026-05-05", model_id=1)
+        second_run_id = self._insert_completed_run(signal_date="2026-05-06", model_id=2)
+
+        all_runs = service.list_runs(limit=10)
+        succeeded_0505 = service.list_runs(limit=10, status="succeeded", signal_date="2026-05-05")
+        run = service.get_run(second_run_id)
+        recs = service.get_run_recommendations(second_run_id)
+
+        self.assertEqual(2, len(all_runs))
+        self.assertEqual(second_run_id, all_runs[0]["id"])
+        self.assertEqual(1, len(succeeded_0505))
+        self.assertEqual(first_run_id, succeeded_0505[0]["id"])
+        self.assertEqual("XGBoost_Default", run["model_name"])
+        self.assertEqual("xgb", run["model_key"])
+        self.assertEqual(1, len(recs))
+        self.assertEqual("AAPL", recs[0]["symbol"])
+
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
         portfolio_run_id = create_portfolio_run(

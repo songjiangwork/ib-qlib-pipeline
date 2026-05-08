@@ -5,8 +5,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from sqlalchemy import select
 
-from ..dborm.models import Recommendation, Run
+from ..dborm.models import ModelRef, Recommendation, Run, Schedule
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -102,5 +103,145 @@ def insert_completed_run(
     except Exception:
         session.rollback()
         raise
+    finally:
+        session.close()
+
+
+def list_runs(
+    db_path: Path,
+    *,
+    limit: int = 50,
+    status: str | None = None,
+    signal_date: str | None = None,
+) -> list[dict[str, Any]]:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        query = (
+            select(
+                Run,
+                Schedule.name.label("schedule_name"),
+                ModelRef.key.label("model_key"),
+                ModelRef.name.label("model_name"),
+                ModelRef.model_class.label("model_class"),
+                ModelRef.module_path.label("model_module_path"),
+            )
+            .select_from(Run)
+            .outerjoin(Schedule, Schedule.id == Run.schedule_id)
+            .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+        )
+        if status is not None:
+            query = query.where(Run.status == status)
+        if signal_date is not None:
+            query = query.where(Run.signal_date == signal_date)
+        query = query.order_by(Run.started_at.desc().nullslast(), Run.created_at.desc()).limit(limit)
+        rows = session.execute(query).all()
+        items: list[dict[str, Any]] = []
+        for run, schedule_name, model_key, model_name, model_class, model_module_path in rows:
+            item = {
+                "id": run.id,
+                "schedule_id": run.schedule_id,
+                "model_id": run.model_id,
+                "trigger_source": run.trigger_source,
+                "status": run.status,
+                "client_id": run.client_id,
+                "lookback_days": run.lookback_days,
+                "workflow_base": run.workflow_base,
+                "command": run.command,
+                "created_at": run.created_at,
+                "started_at": run.started_at,
+                "finished_at": run.finished_at,
+                "signal_date": run.signal_date,
+                "ranking_csv_path": run.ranking_csv_path,
+                "html_report_path": run.html_report_path,
+                "experiment_id": run.experiment_id,
+                "recorder_id": run.recorder_id,
+                "row_count": run.row_count,
+                "log_output": run.log_output,
+                "error_text": run.error_text,
+                "schedule_name": schedule_name,
+                "model_key": model_key,
+                "model_name": model_name,
+                "model_class": model_class,
+                "model_module_path": model_module_path,
+            }
+            items.append(item)
+        return items
+    finally:
+        session.close()
+
+
+def get_run(db_path: Path, run_id: int) -> dict[str, Any] | None:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        row = session.execute(
+            select(
+                Run,
+                Schedule.name.label("schedule_name"),
+                ModelRef.key.label("model_key"),
+                ModelRef.name.label("model_name"),
+                ModelRef.model_class.label("model_class"),
+                ModelRef.module_path.label("model_module_path"),
+            )
+            .select_from(Run)
+            .outerjoin(Schedule, Schedule.id == Run.schedule_id)
+            .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+            .where(Run.id == run_id)
+        ).first()
+        if row is None:
+            return None
+        run, schedule_name, model_key, model_name, model_class, model_module_path = row
+        return {
+            "id": run.id,
+            "schedule_id": run.schedule_id,
+            "model_id": run.model_id,
+            "trigger_source": run.trigger_source,
+            "status": run.status,
+            "client_id": run.client_id,
+            "lookback_days": run.lookback_days,
+            "workflow_base": run.workflow_base,
+            "command": run.command,
+            "created_at": run.created_at,
+            "started_at": run.started_at,
+            "finished_at": run.finished_at,
+            "signal_date": run.signal_date,
+            "ranking_csv_path": run.ranking_csv_path,
+            "html_report_path": run.html_report_path,
+            "experiment_id": run.experiment_id,
+            "recorder_id": run.recorder_id,
+            "row_count": run.row_count,
+            "log_output": run.log_output,
+            "error_text": run.error_text,
+            "schedule_name": schedule_name,
+            "model_key": model_key,
+            "model_name": model_name,
+            "model_class": model_class,
+            "model_module_path": model_module_path,
+        }
+    finally:
+        session.close()
+
+
+def get_run_recommendations(db_path: Path, run_id: int) -> list[dict[str, Any]]:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        rows = session.execute(
+            select(Recommendation)
+            .where(Recommendation.run_id == run_id)
+            .order_by(Recommendation.rank)
+        ).scalars().all()
+        return [
+            {
+                "rank": row.rank,
+                "symbol": row.symbol,
+                "score": row.score,
+                "percentile": row.percentile,
+                "entry_price": row.entry_price,
+                "signal_date": row.signal_date,
+            }
+            for row in rows
+        ]
     finally:
         session.close()

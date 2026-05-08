@@ -30,7 +30,12 @@ from .job_store import (
 )
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .portfolio_store import list_portfolio_runs
-from .run_store import ranking_df_to_rows
+from .run_store import (
+    get_run as get_run_record,
+    get_run_recommendations as get_run_recommendation_records,
+    list_runs as list_run_records,
+    ranking_df_to_rows,
+)
 from .schedule_store import (
     create_schedule as create_schedule_record,
     delete_schedule as delete_schedule_record,
@@ -104,29 +109,12 @@ class RankingBackendService:
         status: str | None = None,
         signal_date: str | None = None,
     ) -> list[dict[str, Any]]:
-        query = """
-            SELECT r.*, s.name AS schedule_name,
-                   m.key AS model_key,
-                   m.name AS model_name,
-                   m.model_class AS model_class,
-                   m.module_path AS model_module_path
-            FROM runs r
-            LEFT JOIN schedules s ON s.id = r.schedule_id
-            LEFT JOIN models m ON m.id = r.model_id
-            WHERE 1 = 1
-        """
-        params: list[Any] = []
-        if status is not None:
-            query += " AND r.status = ?"
-            params.append(status)
-        if signal_date is not None:
-            query += " AND r.signal_date = ?"
-            params.append(signal_date)
-        query += " ORDER BY COALESCE(r.started_at, r.created_at) DESC LIMIT ?"
-        params.append(limit)
-        with connect(self.settings.db_path) as conn:
-            rows = conn.execute(query, tuple(params)).fetchall()
-        return rows_to_dicts(rows)
+        return list_run_records(
+            self.settings.db_path,
+            limit=limit,
+            status=status,
+            signal_date=signal_date,
+        )
 
     def list_jobs(self, limit: int = 30) -> list[dict[str, Any]]:
         return list_job_records(self.settings.db_path, limit=limit)
@@ -253,37 +241,13 @@ class RankingBackendService:
         }
 
     def get_run(self, run_id: int) -> dict[str, Any]:
-        with connect(self.settings.db_path) as conn:
-            row = conn.execute(
-                """
-                SELECT r.*, s.name AS schedule_name,
-                       m.key AS model_key,
-                       m.name AS model_name,
-                       m.model_class AS model_class,
-                       m.module_path AS model_module_path
-                FROM runs r
-                LEFT JOIN schedules s ON s.id = r.schedule_id
-                LEFT JOIN models m ON m.id = r.model_id
-                WHERE r.id = ?
-                """,
-                (run_id,),
-            ).fetchone()
+        row = get_run_record(self.settings.db_path, run_id)
         if row is None:
             raise NotFoundError(f"Run {run_id} not found")
-        return dict(row)
+        return row
 
     def get_run_recommendations(self, run_id: int) -> list[dict[str, Any]]:
-        with connect(self.settings.db_path) as conn:
-            rows = conn.execute(
-                """
-                SELECT rank, symbol, score, percentile, entry_price, signal_date
-                FROM recommendations
-                WHERE run_id = ?
-                ORDER BY rank
-                """,
-                (run_id,),
-            ).fetchall()
-        return rows_to_dicts(rows)
+        return get_run_recommendation_records(self.settings.db_path, run_id)
 
     def trigger_manual_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         return self._start_job(
