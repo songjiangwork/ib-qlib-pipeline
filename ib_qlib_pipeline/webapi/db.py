@@ -1,280 +1,66 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
-from typing import Any
+
+from sqlalchemy import inspect, text
+
+from ..dborm.base import Base
+from ..dborm import models as _models  # noqa: F401
+from ..dborm.session import create_engine_for_path
 
 
-SCHEMA = """
-PRAGMA foreign_keys = ON;
-
-CREATE TABLE IF NOT EXISTS models (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
-    key TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    model_class TEXT NOT NULL,
-    module_path TEXT NOT NULL,
-    workflow_base TEXT,
-    details_json TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS schedules (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    schedule_type TEXT NOT NULL DEFAULT 'ranking',
-    enabled INTEGER NOT NULL DEFAULT 1,
-    timezone TEXT NOT NULL,
-    day_of_week TEXT NOT NULL DEFAULT 'mon-fri',
-    hour INTEGER NOT NULL,
-    minute INTEGER NOT NULL,
-    client_id INTEGER NOT NULL DEFAULT 151,
-    lookback_days INTEGER NOT NULL DEFAULT 7,
-    workflow_base TEXT NOT NULL,
-    pipeline_start_date TEXT,
-    pipeline_include_portfolio INTEGER NOT NULL DEFAULT 1,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    last_triggered_at TEXT,
-    last_run_id INTEGER,
-    last_run_status TEXT
-);
-
-CREATE TABLE IF NOT EXISTS universes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    key TEXT NOT NULL UNIQUE,
-    name TEXT NOT NULL,
-    symbols_file TEXT NOT NULL,
-    symbol_count INTEGER NOT NULL,
-    description TEXT,
-    details_json TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS universe_symbols (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    universe_id INTEGER NOT NULL REFERENCES universes(id) ON DELETE CASCADE,
-    symbol TEXT NOT NULL,
-    ib_symbol TEXT NOT NULL,
-    sort_order INTEGER NOT NULL,
-    source_line TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(universe_id, symbol)
-);
-
-CREATE TABLE IF NOT EXISTS runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
-    model_id INTEGER REFERENCES models(id) ON DELETE SET NULL,
-    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
-    trigger_source TEXT NOT NULL,
-    status TEXT NOT NULL,
-    client_id INTEGER NOT NULL,
-    lookback_days INTEGER NOT NULL,
-    workflow_base TEXT NOT NULL,
-    command TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    signal_date TEXT,
-    ranking_csv_path TEXT,
-    html_report_path TEXT,
-    experiment_id TEXT,
-    recorder_id TEXT,
-    row_count INTEGER,
-    log_output TEXT,
-    error_text TEXT
-);
-
-CREATE TABLE IF NOT EXISTS recommendations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    rank INTEGER NOT NULL,
-    symbol TEXT NOT NULL,
-    score REAL NOT NULL,
-    percentile REAL,
-    entry_price REAL,
-    signal_date TEXT NOT NULL,
-    UNIQUE(run_id, rank)
-);
-
-CREATE TABLE IF NOT EXISTS portfolio_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
-    name TEXT NOT NULL,
-    strategy TEXT NOT NULL,
-    buy_top_n INTEGER NOT NULL,
-    hold_top_n INTEGER NOT NULL,
-    target_notional REAL NOT NULL,
-    start_signal_date TEXT NOT NULL,
-    end_signal_date TEXT,
-    created_at TEXT NOT NULL,
-    notes TEXT
-);
-
-CREATE TABLE IF NOT EXISTS portfolio_lots (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_run_id INTEGER NOT NULL REFERENCES portfolio_runs(id) ON DELETE CASCADE,
-    symbol TEXT NOT NULL,
-    entry_run_id INTEGER NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
-    entry_signal_date TEXT NOT NULL,
-    entry_trade_date TEXT NOT NULL,
-    entry_rank INTEGER NOT NULL,
-    entry_price_open REAL NOT NULL,
-    shares INTEGER NOT NULL,
-    target_notional REAL NOT NULL,
-    exit_run_id INTEGER REFERENCES runs(id) ON DELETE SET NULL,
-    exit_signal_date TEXT,
-    exit_trade_date TEXT,
-    exit_rank INTEGER,
-    exit_price_open REAL,
-    realized_pnl REAL,
-    realized_return_pct REAL,
-    status TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS portfolio_marks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    portfolio_lot_id INTEGER NOT NULL REFERENCES portfolio_lots(id) ON DELETE CASCADE,
-    trade_date TEXT NOT NULL,
-    close_price REAL NOT NULL,
-    market_value REAL NOT NULL,
-    unrealized_pnl REAL NOT NULL,
-    unrealized_return_pct REAL NOT NULL,
-    is_in_top20 INTEGER NOT NULL,
-    is_in_top10 INTEGER NOT NULL,
-    UNIQUE(portfolio_lot_id, trade_date)
-);
-
-CREATE TABLE IF NOT EXISTS jobs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    status TEXT NOT NULL,
-    payload_json TEXT,
-    created_at TEXT NOT NULL,
-    started_at TEXT,
-    finished_at TEXT,
-    requested_by TEXT,
-    log_output TEXT,
-    error_text TEXT
-);
-
-CREATE TABLE IF NOT EXISTS job_steps (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-    step_order INTEGER NOT NULL,
-    step_name TEXT NOT NULL,
-    status TEXT NOT NULL,
-    command TEXT,
-    started_at TEXT,
-    finished_at TEXT,
-    log_output TEXT,
-    error_text TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_signal_date ON runs(signal_date DESC);
-CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC);
-CREATE INDEX IF NOT EXISTS idx_universe_symbols_universe_order ON universe_symbols(universe_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_universe_symbols_symbol ON universe_symbols(symbol);
-CREATE INDEX IF NOT EXISTS idx_recommendations_run_id ON recommendations(run_id, rank);
-CREATE INDEX IF NOT EXISTS idx_recommendations_symbol_date ON recommendations(symbol, signal_date);
-CREATE INDEX IF NOT EXISTS idx_portfolio_runs_created_at ON portfolio_runs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_portfolio_runs_universe_id ON portfolio_runs(universe_id, end_signal_date DESC);
-CREATE INDEX IF NOT EXISTS idx_portfolio_lots_run_symbol ON portfolio_lots(portfolio_run_id, symbol, status);
-CREATE INDEX IF NOT EXISTS idx_portfolio_lots_entry_date ON portfolio_lots(entry_trade_date);
-CREATE INDEX IF NOT EXISTS idx_portfolio_marks_lot_date ON portfolio_marks(portfolio_lot_id, trade_date);
-CREATE INDEX IF NOT EXISTS idx_portfolio_marks_trade_date ON portfolio_marks(trade_date);
-CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_job_steps_job_order ON job_steps(job_id, step_order);
-CREATE INDEX IF NOT EXISTS idx_models_universe_id ON models(universe_id, key);
-"""
-
-
-def connect(db_path: Path) -> sqlite3.Connection:
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+RANKING_DB_TABLES = [
+    "universes",
+    "universe_symbols",
+    "models",
+    "schedules",
+    "runs",
+    "recommendations",
+    "portfolio_runs",
+    "portfolio_lots",
+    "portfolio_marks",
+    "jobs",
+    "job_steps",
+]
 
 
 def init_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
-    with connect(db_path) as conn:
-        conn.executescript(SCHEMA)
-        _migrate_schema(conn)
+    engine = create_engine_for_path(db_path)
+    tables = [Base.metadata.tables[name] for name in RANKING_DB_TABLES]
+    Base.metadata.create_all(bind=engine, tables=tables, checkfirst=True)
+    _migrate_schema(engine)
 
 
-def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
-    rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
-    return {str(row["name"]) for row in rows}
+def _column_names(engine, table_name: str) -> set[str]:
+    inspector = inspect(engine)
+    return {str(column["name"]) for column in inspector.get_columns(table_name)}
 
 
-def _migrate_schema(conn: sqlite3.Connection) -> None:
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS universes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            key TEXT NOT NULL UNIQUE,
-            name TEXT NOT NULL,
-            symbols_file TEXT NOT NULL,
-            symbol_count INTEGER NOT NULL,
-            description TEXT,
-            details_json TEXT,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-        """
-    )
-    conn.execute(
-        """
-        CREATE TABLE IF NOT EXISTS universe_symbols (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            universe_id INTEGER NOT NULL REFERENCES universes(id) ON DELETE CASCADE,
-            symbol TEXT NOT NULL,
-            ib_symbol TEXT NOT NULL,
-            sort_order INTEGER NOT NULL,
-            source_line TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            UNIQUE(universe_id, symbol)
-        )
-        """
-    )
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_universe_symbols_universe_order ON universe_symbols(universe_id, sort_order)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_universe_symbols_symbol ON universe_symbols(symbol)")
+def _migrate_schema(engine) -> None:
+    with engine.begin() as conn:
+        model_columns = _column_names(engine, "models")
+        if "universe_id" not in model_columns:
+            conn.execute(text("ALTER TABLE models ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_models_universe_id ON models(universe_id, key)"))
 
-    model_columns = _column_names(conn, "models")
-    if "universe_id" not in model_columns:
-        conn.execute("ALTER TABLE models ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_models_universe_id ON models(universe_id, key)")
+        runs_columns = _column_names(engine, "runs")
+        if "model_id" not in runs_columns:
+            conn.execute(text("ALTER TABLE runs ADD COLUMN model_id INTEGER REFERENCES models(id) ON DELETE SET NULL"))
+        if "universe_id" not in runs_columns:
+            conn.execute(text("ALTER TABLE runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_runs_model_id ON runs(model_id, signal_date DESC)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC)"))
 
-    runs_columns = _column_names(conn, "runs")
-    if "model_id" not in runs_columns:
-        conn.execute("ALTER TABLE runs ADD COLUMN model_id INTEGER REFERENCES models(id) ON DELETE SET NULL")
-    if "universe_id" not in runs_columns:
-        conn.execute("ALTER TABLE runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_model_id ON runs(model_id, signal_date DESC)")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC)")
+        portfolio_run_columns = _column_names(engine, "portfolio_runs")
+        if "universe_id" not in portfolio_run_columns:
+            conn.execute(text("ALTER TABLE portfolio_runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS idx_portfolio_runs_universe_id ON portfolio_runs(universe_id, end_signal_date DESC)"))
 
-    portfolio_run_columns = _column_names(conn, "portfolio_runs")
-    if "universe_id" not in portfolio_run_columns:
-        conn.execute("ALTER TABLE portfolio_runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
-    conn.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_runs_universe_id ON portfolio_runs(universe_id, end_signal_date DESC)")
-
-    schedule_columns = _column_names(conn, "schedules")
-    if "schedule_type" not in schedule_columns:
-        conn.execute("ALTER TABLE schedules ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'ranking'")
-    if "pipeline_start_date" not in schedule_columns:
-        conn.execute("ALTER TABLE schedules ADD COLUMN pipeline_start_date TEXT")
-    if "pipeline_include_portfolio" not in schedule_columns:
-        conn.execute("ALTER TABLE schedules ADD COLUMN pipeline_include_portfolio INTEGER NOT NULL DEFAULT 1")
-
-
-def rows_to_dicts(rows: list[sqlite3.Row]) -> list[dict[str, Any]]:
-    return [dict(row) for row in rows]
+        schedule_columns = _column_names(engine, "schedules")
+        if "schedule_type" not in schedule_columns:
+            conn.execute(text("ALTER TABLE schedules ADD COLUMN schedule_type TEXT NOT NULL DEFAULT 'ranking'"))
+        if "pipeline_start_date" not in schedule_columns:
+            conn.execute(text("ALTER TABLE schedules ADD COLUMN pipeline_start_date TEXT"))
+        if "pipeline_include_portfolio" not in schedule_columns:
+            conn.execute(text("ALTER TABLE schedules ADD COLUMN pipeline_include_portfolio INTEGER NOT NULL DEFAULT 1"))
