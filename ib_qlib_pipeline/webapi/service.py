@@ -60,6 +60,7 @@ from .universe_store import (
     ensure_default_universes,
     get_universe as get_universe_record,
     list_universes as list_universe_records,
+    list_universe_symbols as list_universe_symbol_records,
     update_universe as update_universe_record,
 )
 from ..ranking.ranking_loader import read_available_trading_days
@@ -105,6 +106,12 @@ class RankingBackendService:
         if row is None:
             raise NotFoundError(f"Universe {universe_id} not found")
         return row
+
+    def list_universe_symbols(self, universe_id: int) -> list[dict[str, Any]]:
+        row = get_universe_record(self.settings.db_path, universe_id)
+        if row is None:
+            raise NotFoundError(f"Universe {universe_id} not found")
+        return list_universe_symbol_records(self.settings.db_path, universe_id)
 
     def create_universe(self, payload: dict[str, Any]) -> dict[str, Any]:
         return create_universe_record(self.settings.db_path, self.settings.project_root, payload)

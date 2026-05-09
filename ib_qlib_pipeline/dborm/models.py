@@ -40,8 +40,29 @@ class Universe(Base):
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
     models: Mapped[list[ModelRef]] = relationship(back_populates="universe")
+    symbols: Mapped[list["UniverseSymbol"]] = relationship(back_populates="universe", cascade="all, delete-orphan")
     runs: Mapped[list["Run"]] = relationship(back_populates="universe")
     portfolio_runs: Mapped[list["PortfolioRun"]] = relationship(back_populates="universe")
+
+
+class UniverseSymbol(Base):
+    __tablename__ = "universe_symbols"
+    __table_args__ = (
+        UniqueConstraint("universe_id", "symbol"),
+        Index("idx_universe_symbols_universe_order", "universe_id", "sort_order"),
+        Index("idx_universe_symbols_symbol", "symbol"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    universe_id: Mapped[int] = mapped_column(ForeignKey("universes.id", ondelete="CASCADE"), nullable=False)
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    ib_symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_line: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    universe: Mapped[Universe] = relationship(back_populates="symbols")
 
 
 class Schedule(Base):

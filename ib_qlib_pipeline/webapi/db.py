@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS universes (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS universe_symbols (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    universe_id INTEGER NOT NULL REFERENCES universes(id) ON DELETE CASCADE,
+    symbol TEXT NOT NULL,
+    ib_symbol TEXT NOT NULL,
+    sort_order INTEGER NOT NULL,
+    source_line TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(universe_id, symbol)
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
@@ -168,6 +180,8 @@ CREATE TABLE IF NOT EXISTS job_steps (
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_signal_date ON runs(signal_date DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC);
+CREATE INDEX IF NOT EXISTS idx_universe_symbols_universe_order ON universe_symbols(universe_id, sort_order);
+CREATE INDEX IF NOT EXISTS idx_universe_symbols_symbol ON universe_symbols(symbol);
 CREATE INDEX IF NOT EXISTS idx_recommendations_run_id ON recommendations(run_id, rank);
 CREATE INDEX IF NOT EXISTS idx_recommendations_symbol_date ON recommendations(symbol, signal_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_runs_created_at ON portfolio_runs(created_at DESC);
@@ -217,6 +231,23 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS universe_symbols (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            universe_id INTEGER NOT NULL REFERENCES universes(id) ON DELETE CASCADE,
+            symbol TEXT NOT NULL,
+            ib_symbol TEXT NOT NULL,
+            sort_order INTEGER NOT NULL,
+            source_line TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(universe_id, symbol)
+        )
+        """
+    )
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_universe_symbols_universe_order ON universe_symbols(universe_id, sort_order)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_universe_symbols_symbol ON universe_symbols(symbol)")
 
     model_columns = _column_names(conn, "models")
     if "universe_id" not in model_columns:

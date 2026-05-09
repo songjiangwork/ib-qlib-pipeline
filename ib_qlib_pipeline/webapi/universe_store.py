@@ -5,9 +5,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
-from ..dborm.models import ModelRef, PortfolioLot, PortfolioRun, Run, Universe
+from ..dborm.models import ModelRef, PortfolioLot, PortfolioRun, Run, Universe, UniverseSymbol
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -42,12 +42,29 @@ def _session_for_db(db_path: Path):
 
 
 def _count_symbols(symbols_path: Path) -> int:
-    count = 0
+    return len(_read_symbol_rows(symbols_path))
+
+
+def _read_symbol_rows(symbols_path: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    sort_order = 0
     for raw in symbols_path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
-        if line and not line.startswith("#"):
-            count += 1
-    return count
+        if not line or line.startswith("#"):
+            continue
+        sort_order += 1
+        parts = [part.strip() for part in line.split(",")]
+        symbol = parts[0]
+        ib_symbol = parts[1] if len(parts) > 1 and parts[1] else symbol
+        rows.append(
+            {
+                "symbol": symbol,
+                "ib_symbol": ib_symbol,
+                "sort_order": sort_order,
+                "source_line": line,
+            }
+        )
+    return rows
 
 
 def _resolve_symbols_path(project_root: Path, symbols_file: str) -> Path:
@@ -74,6 +91,40 @@ def _universe_to_dict(item: Universe) -> dict[str, Any]:
     }
 
 
+def _universe_symbol_to_dict(item: UniverseSymbol) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "universe_id": item.universe_id,
+        "symbol": item.symbol,
+        "ib_symbol": item.ib_symbol,
+        "sort_order": item.sort_order,
+        "source_line": item.source_line,
+        "created_at": item.created_at,
+        "updated_at": item.updated_at,
+    }
+
+
+def _sync_universe_symbols(session: Any, project_root: Path, universe: Universe) -> None:
+    symbols_path = _resolve_symbols_path(project_root, universe.symbols_file)
+    rows = _read_symbol_rows(symbols_path)
+    now = dt.datetime.now(dt.timezone.utc).isoformat()
+    session.execute(delete(UniverseSymbol).where(UniverseSymbol.universe_id == universe.id))
+    session.add_all(
+        [
+            UniverseSymbol(
+                universe_id=int(universe.id),
+                symbol=str(row["symbol"]),
+                ib_symbol=str(row["ib_symbol"]),
+                sort_order=int(row["sort_order"]),
+                source_line=str(row["source_line"]),
+                created_at=now,
+                updated_at=now,
+            )
+            for row in rows
+        ]
+    )
+
+
 def ensure_default_universes(db_path: Path, project_root: Path) -> None:
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
@@ -82,18 +133,19 @@ def ensure_default_universes(db_path: Path, project_root: Path) -> None:
             symbol_count = _count_symbols(symbols_path)
             existing = session.execute(select(Universe).where(Universe.key == item["key"])).scalar_one_or_none()
             if existing is None:
-                session.add(
-                    Universe(
-                        key=str(item["key"]),
-                        name=str(item["name"]),
-                        symbols_file=str(item["symbols_file"]),
-                        symbol_count=symbol_count,
-                        description=str(item["description"]),
-                        details_json=json.dumps(item["details"], ensure_ascii=True, sort_keys=True),
-                        created_at=now,
-                        updated_at=now,
-                    )
+                created = Universe(
+                    key=str(item["key"]),
+                    name=str(item["name"]),
+                    symbols_file=str(item["symbols_file"]),
+                    symbol_count=symbol_count,
+                    description=str(item["description"]),
+                    details_json=json.dumps(item["details"], ensure_ascii=True, sort_keys=True),
+                    created_at=now,
+                    updated_at=now,
                 )
+                session.add(created)
+                session.flush()
+                _sync_universe_symbols(session, project_root, created)
                 continue
             existing.name = str(item["name"])
             existing.symbols_file = str(item["symbols_file"])
@@ -101,6 +153,7 @@ def ensure_default_universes(db_path: Path, project_root: Path) -> None:
             existing.description = str(item["description"])
             existing.details_json = json.dumps(item["details"], ensure_ascii=True, sort_keys=True)
             existing.updated_at = now
+            _sync_universe_symbols(session, project_root, existing)
         session.commit()
 
 
@@ -145,6 +198,8 @@ def create_universe(db_path: Path, project_root: Path, payload: dict[str, Any]) 
             updated_at=now,
         )
         session.add(item)
+        session.flush()
+        _sync_universe_symbols(session, project_root, item)
         session.commit()
         session.refresh(item)
         return _universe_to_dict(item)
@@ -173,9 +228,21 @@ def update_universe(db_path: Path, project_root: Path, universe_id: int, payload
                 else None
             )
         item.updated_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        if "symbols_file" in payload:
+            _sync_universe_symbols(session, project_root, item)
         session.commit()
         session.refresh(item)
         return _universe_to_dict(item)
+
+
+def list_universe_symbols(db_path: Path, universe_id: int) -> list[dict[str, Any]]:
+    with _session_for_db(db_path) as session:
+        rows = session.execute(
+            select(UniverseSymbol)
+            .where(UniverseSymbol.universe_id == universe_id)
+            .order_by(UniverseSymbol.sort_order, UniverseSymbol.id)
+        ).scalars().all()
+    return [_universe_symbol_to_dict(row) for row in rows]
 
 
 def backfill_model_universes(db_path: Path, default_universe_key: str = "sp500") -> None:

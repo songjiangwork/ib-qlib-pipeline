@@ -86,6 +86,13 @@ def create_app() -> FastAPI:
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @app.get("/api/universes/{universe_id}/symbols")
+    def get_universe_symbols(universe_id: int) -> list[dict[str, Any]]:
+        try:
+            return get_service().list_universe_symbols(universe_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @app.post("/api/universes")
     def create_universe(payload: UniverseCreate) -> dict[str, Any]:
         return get_service().create_universe(payload.model_dump())

@@ -59,6 +59,7 @@ from ib_qlib_pipeline.webapi.universe_store import (
     create_universe,
     get_universe,
     get_universe_by_key,
+    list_universe_symbols,
     list_universes,
     update_universe,
 )
@@ -148,6 +149,19 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(sp500["id"], model["universe_id"])
         self.assertEqual("S&P 500", model["universe_name"])
 
+        sp500_symbols = list_universe_symbols(self.db_path, int(sp500["id"]))
+        self.assertEqual(503, len(sp500_symbols))
+        self.assertEqual("MMM", sp500_symbols[0]["symbol"])
+        self.assertEqual("MMM", sp500_symbols[0]["ib_symbol"])
+        self.assertEqual(1, sp500_symbols[0]["sort_order"])
+
+        union = get_universe_by_key(self.db_path, "us_union_sp500_ndx_djia_sox")
+        self.assertIsNotNone(union)
+        union_symbols = list_universe_symbols(self.db_path, int(union["id"]))
+        self.assertEqual(524, len(union_symbols))
+        self.assertEqual("MMM", union_symbols[0]["symbol"])
+        self.assertEqual("WOLF", union_symbols[-1]["symbol"])
+
     def test_universe_store_create_and_update(self) -> None:
         created = create_universe(
             self.db_path,
@@ -187,6 +201,7 @@ class StoreTestCase(unittest.TestCase):
         list_endpoint = route_map[("/api/universes", ("GET",))]
         create_endpoint = route_map[("/api/universes", ("POST",))]
         update_endpoint = route_map[("/api/universes/{universe_id}", ("PATCH",))]
+        list_symbols_endpoint = route_map[("/api/universes/{universe_id}/symbols", ("GET",))]
 
         listed = list_endpoint()
         self.assertEqual(2, len(listed))
@@ -207,6 +222,10 @@ class StoreTestCase(unittest.TestCase):
             UniverseUpdate(name="SP500 Top20 API v2"),
         )
         self.assertEqual("SP500 Top20 API v2", updated_body["name"])
+
+        symbols = list_symbols_endpoint(int(created_body["id"]))
+        self.assertEqual(120, len(symbols))
+        self.assertEqual("MMM", symbols[0]["symbol"])
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)
