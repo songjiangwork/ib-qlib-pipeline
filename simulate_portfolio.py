@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from ib_qlib_pipeline.marketdata.daily_db import default_daily_db_path
+from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
 from ib_qlib_pipeline.webapi.db import connect, init_db
 from ib_qlib_pipeline.webapi.portfolio_store import (
     OpenLot,
@@ -108,6 +110,18 @@ def load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
 
 
 def get_price(project_root: Path, symbol: str, trade_date: dt.date, field: str) -> float | None:
+    db_path = default_daily_db_path(project_root)
+    if db_path.exists():
+        provider = DailySqlitePriceProvider(db_path)
+        bars = provider.list_price_bars(
+            symbol=symbol,
+            interval="1d",
+            start_date=trade_date,
+            end_date=trade_date,
+        )
+        if bars:
+            value = bars[-1].get(field)
+            return float(value) if value is not None else None
     try:
         frame = load_price_frame(str(project_root), symbol)
     except FileNotFoundError:

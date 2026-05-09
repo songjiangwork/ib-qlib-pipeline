@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .price_provider import DailySqlitePriceProvider
+from ..webapi.universe_store import get_universe_by_key, list_universe_symbols
 
 
 SCHEMA = """
@@ -113,3 +114,11 @@ class DailyPriceStore:
                 continue
             total += import_daily_csv_file(self.db_path, csv_path, symbol=symbol)
         return total
+
+    def import_universe(self, service_db_path: Path, *, universe_key: str) -> int:
+        universe = get_universe_by_key(service_db_path, universe_key)
+        if universe is None:
+            raise RuntimeError(f"Universe not found: {universe_key}")
+        rows = list_universe_symbols(service_db_path, int(universe["id"]))
+        symbols = [str(row["symbol"]) for row in rows]
+        return self.import_qlib_csv_directory(symbols=symbols)
