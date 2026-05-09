@@ -7,6 +7,9 @@ from typing import Any
 
 import pandas as pd
 
+from ..marketdata.daily_db import default_daily_db_path
+from ..marketdata.price_provider import DailySqlitePriceProvider
+
 
 @lru_cache(maxsize=2048)
 def _load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
@@ -25,6 +28,12 @@ def list_price_history(
     start_date: dt.date | None = None,
     end_date: dt.date | None = None,
 ) -> list[dict[str, Any]]:
+    db_path = default_daily_db_path(project_root)
+    if db_path.exists():
+        provider = DailySqlitePriceProvider(db_path)
+        rows = provider.list_price_history(symbol=symbol, start_date=start_date, end_date=end_date)
+        if rows:
+            return rows
     frame = _load_price_frame(str(project_root), symbol)
     if start_date is not None:
         frame = frame[frame["date"] >= start_date]
@@ -48,6 +57,12 @@ def list_price_bars(
 ) -> list[dict[str, Any]]:
     if interval != "1d":
         raise ValueError(f"Unsupported interval: {interval}")
+    db_path = default_daily_db_path(project_root)
+    if db_path.exists():
+        provider = DailySqlitePriceProvider(db_path)
+        rows = provider.list_price_bars(symbol=symbol, interval=interval, start_date=start_date, end_date=end_date)
+        if rows:
+            return rows
     frame = _load_price_frame(str(project_root), symbol)
     if start_date is not None:
         frame = frame[frame["date"] >= start_date]
