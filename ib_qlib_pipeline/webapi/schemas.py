@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -69,3 +69,19 @@ class DailyClosePipelineJobRequest(BaseModel):
     client_id: int = Field(default=151, ge=0)
     start_date: str
     include_portfolio: bool = True
+
+
+class UniverseCreate(BaseModel):
+    key: str = Field(min_length=1, max_length=120)
+    name: str = Field(min_length=1, max_length=160)
+    symbols_file: str = Field(min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
+    details: dict[str, Any] | None = None
+
+
+class UniverseUpdate(BaseModel):
+    key: str | None = Field(default=None, min_length=1, max_length=120)
+    name: str | None = Field(default=None, min_length=1, max_length=160)
+    symbols_file: str | None = Field(default=None, min_length=1, max_length=500)
+    description: str | None = Field(default=None, max_length=500)
+    details: dict[str, Any] | None = None

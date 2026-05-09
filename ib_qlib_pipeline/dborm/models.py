@@ -12,6 +12,7 @@ class ModelRef(Base):
     __tablename__ = "models"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    universe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("universes.id", ondelete="SET NULL"), nullable=True)
     key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     model_class: Mapped[str] = mapped_column(Text, nullable=False)
@@ -21,7 +22,26 @@ class ModelRef(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[str] = mapped_column(Text, nullable=False)
 
+    universe: Mapped[Optional["Universe"]] = relationship(back_populates="models")
     runs: Mapped[list["Run"]] = relationship(back_populates="model")
+
+
+class Universe(Base):
+    __tablename__ = "universes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    symbols_file: Mapped[str] = mapped_column(Text, nullable=False)
+    symbol_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    details_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    models: Mapped[list[ModelRef]] = relationship(back_populates="universe")
+    runs: Mapped[list["Run"]] = relationship(back_populates="universe")
+    portfolio_runs: Mapped[list["PortfolioRun"]] = relationship(back_populates="universe")
 
 
 class Schedule(Base):
@@ -61,6 +81,7 @@ class Run(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     schedule_id: Mapped[Optional[int]] = mapped_column(ForeignKey("schedules.id", ondelete="SET NULL"), nullable=True)
     model_id: Mapped[Optional[int]] = mapped_column(ForeignKey("models.id", ondelete="SET NULL"), nullable=True)
+    universe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("universes.id", ondelete="SET NULL"), nullable=True)
     trigger_source: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False)
     client_id: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -81,6 +102,7 @@ class Run(Base):
 
     schedule: Mapped[Optional[Schedule]] = relationship(back_populates="runs")
     model: Mapped[Optional[ModelRef]] = relationship(back_populates="runs")
+    universe: Mapped[Optional[Universe]] = relationship(back_populates="runs")
     recommendations: Mapped[list["Recommendation"]] = relationship(back_populates="run", cascade="all, delete-orphan")
 
 
@@ -109,6 +131,7 @@ class PortfolioRun(Base):
     __table_args__ = (Index("idx_portfolio_runs_created_at", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    universe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("universes.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     strategy: Mapped[str] = mapped_column(Text, nullable=False)
     buy_top_n: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -119,6 +142,7 @@ class PortfolioRun(Base):
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
+    universe: Mapped[Optional[Universe]] = relationship(back_populates="portfolio_runs")
     lots: Mapped[list["PortfolioLot"]] = relationship(back_populates="portfolio_run", cascade="all, delete-orphan")
 
 

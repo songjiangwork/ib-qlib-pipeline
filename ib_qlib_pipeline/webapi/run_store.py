@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import select
 
-from ..dborm.models import ModelRef, Recommendation, Run, Schedule
+from ..dborm.models import ModelRef, Recommendation, Run, Schedule, Universe
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -60,9 +60,11 @@ def insert_completed_run(
     session_factory = create_session_factory_for_path(db_path)
     session = session_factory()
     try:
+        model = session.get(ModelRef, model_id)
         run = Run(
             schedule_id=schedule_id,
             model_id=model_id,
+            universe_id=int(model.universe_id) if model is not None and model.universe_id is not None else None,
             trigger_source=trigger_source,
             status="succeeded",
             client_id=client_id,
@@ -123,9 +125,11 @@ def create_queued_run(
     session_factory = create_session_factory_for_path(db_path)
     session = session_factory()
     try:
+        model = session.get(ModelRef, model_id)
         run = Run(
             schedule_id=schedule_id,
             model_id=model_id,
+            universe_id=int(model.universe_id) if model is not None and model.universe_id is not None else None,
             trigger_source=trigger_source,
             status="queued",
             client_id=client_id,
@@ -231,10 +235,13 @@ def list_runs(
                 ModelRef.name.label("model_name"),
                 ModelRef.model_class.label("model_class"),
                 ModelRef.module_path.label("model_module_path"),
+                Universe.key.label("universe_key"),
+                Universe.name.label("universe_name"),
             )
             .select_from(Run)
             .outerjoin(Schedule, Schedule.id == Run.schedule_id)
             .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+            .outerjoin(Universe, Universe.id == Run.universe_id)
         )
         if status is not None:
             query = query.where(Run.status == status)
@@ -243,11 +250,12 @@ def list_runs(
         query = query.order_by(Run.started_at.desc().nullslast(), Run.created_at.desc()).limit(limit)
         rows = session.execute(query).all()
         items: list[dict[str, Any]] = []
-        for run, schedule_name, model_key, model_name, model_class, model_module_path in rows:
+        for run, schedule_name, model_key, model_name, model_class, model_module_path, universe_key, universe_name in rows:
             item = {
                 "id": run.id,
                 "schedule_id": run.schedule_id,
                 "model_id": run.model_id,
+                "universe_id": run.universe_id,
                 "trigger_source": run.trigger_source,
                 "status": run.status,
                 "client_id": run.client_id,
@@ -270,6 +278,8 @@ def list_runs(
                 "model_name": model_name,
                 "model_class": model_class,
                 "model_module_path": model_module_path,
+                "universe_key": universe_key,
+                "universe_name": universe_name,
             }
             items.append(item)
         return items
@@ -289,19 +299,23 @@ def get_run(db_path: Path, run_id: int) -> dict[str, Any] | None:
                 ModelRef.name.label("model_name"),
                 ModelRef.model_class.label("model_class"),
                 ModelRef.module_path.label("model_module_path"),
+                Universe.key.label("universe_key"),
+                Universe.name.label("universe_name"),
             )
             .select_from(Run)
             .outerjoin(Schedule, Schedule.id == Run.schedule_id)
             .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+            .outerjoin(Universe, Universe.id == Run.universe_id)
             .where(Run.id == run_id)
         ).first()
         if row is None:
             return None
-        run, schedule_name, model_key, model_name, model_class, model_module_path = row
+        run, schedule_name, model_key, model_name, model_class, model_module_path, universe_key, universe_name = row
         return {
             "id": run.id,
             "schedule_id": run.schedule_id,
             "model_id": run.model_id,
+            "universe_id": run.universe_id,
             "trigger_source": run.trigger_source,
             "status": run.status,
             "client_id": run.client_id,
@@ -324,6 +338,8 @@ def get_run(db_path: Path, run_id: int) -> dict[str, Any] | None:
             "model_name": model_name,
             "model_class": model_class,
             "model_module_path": model_module_path,
+            "universe_key": universe_key,
+            "universe_name": universe_name,
         }
     finally:
         session.close()
@@ -372,9 +388,13 @@ def list_ranking_dates(
                 ModelRef.id.label("model_id"),
                 ModelRef.key.label("model_key"),
                 ModelRef.name.label("model_name"),
+                Universe.id.label("universe_id"),
+                Universe.key.label("universe_key"),
+                Universe.name.label("universe_name"),
             )
             .select_from(Run)
             .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+            .outerjoin(Universe, Universe.id == Run.universe_id)
             .where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))
         )
         count_query = select(Run.id).where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))

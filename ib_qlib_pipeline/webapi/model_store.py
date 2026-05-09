@@ -8,9 +8,10 @@ from typing import Any
 
 import yaml
 from sqlalchemy import create_engine, select
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session, joinedload, sessionmaker
 
 from ..dborm.models import ModelRef
+from .universe_store import ensure_default_universes, get_universe_by_key
 
 
 DEFAULT_MODELS: list[dict[str, Any]] = [
@@ -102,6 +103,7 @@ def _session_for_db(db_path: Path) -> Session:
 def _model_to_dict(model: ModelRef) -> dict[str, Any]:
     item = {
         "id": model.id,
+        "universe_id": model.universe_id,
         "key": model.key,
         "name": model.name,
         "model_class": model.model_class,
@@ -111,11 +113,20 @@ def _model_to_dict(model: ModelRef) -> dict[str, Any]:
         "created_at": model.created_at,
         "updated_at": model.updated_at,
     }
+    item["universe_key"] = model.universe.key if model.universe is not None else None
+    item["universe_name"] = model.universe.name if model.universe is not None else None
     item["details"] = json.loads(model.details_json) if model.details_json else None
     return item
 
 
-def ensure_default_models(db_path: Path) -> None:
+def ensure_default_models(db_path: Path, project_root: Path | None = None) -> None:
+    if project_root is None:
+        project_root = Path(__file__).resolve().parents[2]
+    ensure_default_universes(db_path, project_root)
+    sp500 = get_universe_by_key(db_path, "sp500")
+    if sp500 is None:
+        raise RuntimeError("Default universe 'sp500' is missing")
+    sp500_universe_id = int(sp500["id"])
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
         for model in DEFAULT_MODELS:
@@ -125,6 +136,7 @@ def ensure_default_models(db_path: Path) -> None:
             if existing is None:
                 session.add(
                     ModelRef(
+                        universe_id=sp500_universe_id,
                         key=model["key"],
                         name=model["name"],
                         model_class=model["model_class"],
@@ -137,6 +149,7 @@ def ensure_default_models(db_path: Path) -> None:
                 )
                 continue
             existing.name = model["name"]
+            existing.universe_id = sp500_universe_id
             existing.model_class = model["model_class"]
             existing.module_path = model["module_path"]
             existing.workflow_base = model["workflow_base"]
@@ -147,13 +160,17 @@ def ensure_default_models(db_path: Path) -> None:
 
 def list_models(db_path: Path) -> list[dict[str, Any]]:
     with _session_for_db(db_path) as session:
-        rows = session.execute(select(ModelRef).order_by(ModelRef.id)).scalars().all()
+        rows = session.execute(
+            select(ModelRef).options(joinedload(ModelRef.universe)).order_by(ModelRef.id)
+        ).scalars().all()
     return [_model_to_dict(row) for row in rows]
 
 
 def get_model(db_path: Path, model_id: int) -> dict[str, Any] | None:
     with _session_for_db(db_path) as session:
-        row = session.get(ModelRef, model_id)
+        row = session.execute(
+            select(ModelRef).options(joinedload(ModelRef.universe)).where(ModelRef.id == model_id)
+        ).scalar_one_or_none()
     if row is None:
         return None
     return _model_to_dict(row)
@@ -161,7 +178,9 @@ def get_model(db_path: Path, model_id: int) -> dict[str, Any] | None:
 
 def get_model_by_key(db_path: Path, key: str) -> dict[str, Any] | None:
     with _session_for_db(db_path) as session:
-        row = session.execute(select(ModelRef).where(ModelRef.key == key)).scalar_one_or_none()
+        row = session.execute(
+            select(ModelRef).options(joinedload(ModelRef.universe)).where(ModelRef.key == key)
+        ).scalar_one_or_none()
     if row is None:
         return None
     return _model_to_dict(row)
@@ -183,8 +202,15 @@ def infer_model_from_workflow(project_root: Path, workflow_base: str) -> dict[st
     }
 
 
-def resolve_or_create_model_for_workflow(db_path: Path, project_root: Path, workflow_base: str) -> int:
+def resolve_or_create_model_for_workflow(
+    db_path: Path,
+    project_root: Path,
+    workflow_base: str,
+    universe_id: int | None = None,
+) -> int:
     inferred = infer_model_from_workflow(project_root, workflow_base)
+    sp500 = get_universe_by_key(db_path, "sp500")
+    default_universe_id = universe_id if universe_id is not None else (int(sp500["id"]) if sp500 is not None else None)
     with _session_for_db(db_path) as session:
         row = session.execute(
             select(ModelRef).where(ModelRef.workflow_base == workflow_base).limit(1)
@@ -195,6 +221,7 @@ def resolve_or_create_model_for_workflow(db_path: Path, project_root: Path, work
         now = dt.datetime.now(dt.timezone.utc).isoformat()
         workflow_stem = Path(workflow_base).stem.lower()
         item = ModelRef(
+            universe_id=default_universe_id,
             key=f"{workflow_stem}-{abs(hash((workflow_base, inferred['model_class'], inferred['module_path']))) % 100000}",
             name=workflow_stem,
             model_class=inferred["model_class"],

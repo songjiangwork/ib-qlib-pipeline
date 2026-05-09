@@ -7,7 +7,7 @@ from typing import Any
 
 from sqlalchemy import case, func, select
 
-from ..dborm.models import ModelRef, PortfolioLot, PortfolioMark, PortfolioRun, Run
+from ..dborm.models import ModelRef, PortfolioLot, PortfolioMark, PortfolioRun, Run, Universe
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -32,6 +32,7 @@ def _portfolio_summary_query():
     return (
         select(
             PortfolioRun.id,
+            PortfolioRun.universe_id,
             PortfolioRun.name,
             PortfolioRun.strategy,
             PortfolioRun.buy_top_n,
@@ -60,11 +61,14 @@ def _portfolio_summary_query():
             func.min(ModelRef.name).label("model_name"),
             func.min(ModelRef.model_class).label("model_class"),
             func.min(ModelRef.workflow_base).label("workflow_base"),
+            func.min(Universe.key).label("universe_key"),
+            func.min(Universe.name).label("universe_name"),
         )
         .select_from(PortfolioRun)
         .outerjoin(PortfolioLot, PortfolioLot.portfolio_run_id == PortfolioRun.id)
         .outerjoin(Run, Run.id == PortfolioLot.entry_run_id)
         .outerjoin(ModelRef, ModelRef.id == Run.model_id)
+        .outerjoin(Universe, Universe.id == PortfolioRun.universe_id)
         .group_by(PortfolioRun.id)
     )
 
@@ -132,11 +136,13 @@ def create_portfolio_run(
     target_notional: float,
     start_signal_date: str,
     end_signal_date: str | None,
+    universe_id: int | None = None,
     notes: str | None = None,
 ) -> int:
     created_at = dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
         run = PortfolioRun(
+            universe_id=universe_id,
             name=name,
             strategy=strategy,
             buy_top_n=buy_top_n,

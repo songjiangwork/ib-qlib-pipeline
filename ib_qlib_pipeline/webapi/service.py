@@ -52,6 +52,16 @@ from .schedule_store import (
     update_schedule as update_schedule_record,
 )
 from .settings import Settings
+from .universe_store import (
+    backfill_model_universes,
+    backfill_portfolio_run_universes,
+    backfill_run_universes,
+    create_universe as create_universe_record,
+    ensure_default_universes,
+    get_universe as get_universe_record,
+    list_universes as list_universe_records,
+    update_universe as update_universe_record,
+)
 from ..ranking.ranking_loader import read_available_trading_days
 
 
@@ -69,8 +79,12 @@ class RankingBackendService:
         self._run_lock = threading.Lock()
         self._scheduler = BackgroundScheduler(timezone=settings.timezone)
         init_db(settings.db_path)
-        ensure_default_models(settings.db_path)
+        ensure_default_universes(settings.db_path, settings.project_root)
+        ensure_default_models(settings.db_path, settings.project_root)
+        backfill_model_universes(settings.db_path)
         self._backfill_legacy_run_models()
+        backfill_run_universes(settings.db_path)
+        backfill_portfolio_run_universes(settings.db_path)
 
     def start(self) -> None:
         self._scheduler.start()
@@ -82,6 +96,24 @@ class RankingBackendService:
 
     def list_schedules(self) -> list[dict[str, Any]]:
         return list_schedule_records(self.settings.db_path)
+
+    def list_universes(self) -> list[dict[str, Any]]:
+        return list_universe_records(self.settings.db_path)
+
+    def get_universe(self, universe_id: int) -> dict[str, Any]:
+        row = get_universe_record(self.settings.db_path, universe_id)
+        if row is None:
+            raise NotFoundError(f"Universe {universe_id} not found")
+        return row
+
+    def create_universe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return create_universe_record(self.settings.db_path, self.settings.project_root, payload)
+
+    def update_universe(self, universe_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        row = update_universe_record(self.settings.db_path, self.settings.project_root, universe_id, payload)
+        if row is None:
+            raise NotFoundError(f"Universe {universe_id} not found")
+        return row
 
     def create_schedule(self, payload: dict[str, Any]) -> dict[str, Any]:
         row = create_schedule_record(

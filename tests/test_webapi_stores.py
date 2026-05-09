@@ -10,6 +10,7 @@ from unittest.mock import patch
 import pandas as pd
 
 from ib_qlib_pipeline.dborm.models import Run
+from ib_qlib_pipeline.webapi.app import create_app
 from ib_qlib_pipeline.dborm.session import create_session_factory_for_path
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.job_store import (
@@ -51,8 +52,16 @@ from ib_qlib_pipeline.webapi.schedule_store import (
     list_schedules,
     update_schedule,
 )
+from ib_qlib_pipeline.webapi.schemas import UniverseCreate, UniverseUpdate
 from ib_qlib_pipeline.webapi.service import RankingBackendService
 from ib_qlib_pipeline.webapi.settings import Settings
+from ib_qlib_pipeline.webapi.universe_store import (
+    create_universe,
+    get_universe,
+    get_universe_by_key,
+    list_universes,
+    update_universe,
+)
 
 
 class StoreTestCase(unittest.TestCase):
@@ -108,6 +117,96 @@ class StoreTestCase(unittest.TestCase):
             api_port=8001,
         )
         return RankingBackendService(settings)
+
+    def _make_app(self):
+        settings = Settings(
+            project_root=self.project_root,
+            db_path=self.db_path,
+            timezone="America/Denver",
+            default_workflow_base="examples/workflow_us_lgb_2020_port.yaml",
+            run_script_path=self.project_root / "run_daily_ranking.sh",
+            api_host="127.0.0.1",
+            api_port=8001,
+        )
+        with patch("ib_qlib_pipeline.webapi.app.Settings.load", return_value=settings):
+            app = create_app()
+        app.state.settings = settings
+        app.state.service = RankingBackendService(settings)
+        return app
+
+    def test_universe_store_defaults_and_model_binding(self) -> None:
+        universes = list_universes(self.db_path)
+        self.assertEqual(2, len(universes))
+        self.assertEqual("sp500", universes[0]["key"])
+        self.assertEqual(503, universes[0]["symbol_count"])
+        self.assertEqual("us_union_sp500_ndx_djia_sox", universes[1]["key"])
+        self.assertEqual(524, universes[1]["symbol_count"])
+
+        sp500 = get_universe_by_key(self.db_path, "sp500")
+        model = get_model_by_key(self.db_path, "lgb")
+        self.assertIsNotNone(sp500)
+        self.assertEqual(sp500["id"], model["universe_id"])
+        self.assertEqual("S&P 500", model["universe_name"])
+
+    def test_universe_store_create_and_update(self) -> None:
+        created = create_universe(
+            self.db_path,
+            self.project_root,
+            {
+                "key": "sp500_top20",
+                "name": "SP500 Top20",
+                "symbols_file": "symbols/sp500_120.txt",
+                "description": "Pilot subset",
+                "details": {"purpose": "pilot"},
+            },
+        )
+        self.assertEqual(120, created["symbol_count"])
+
+        updated = update_universe(
+            self.db_path,
+            self.project_root,
+            created["id"],
+            {
+                "name": "SP500 Top20 Updated",
+                "description": "Pilot subset updated",
+                "details": {"purpose": "pilot", "version": 2},
+            },
+        )
+        fetched = get_universe(self.db_path, created["id"])
+        self.assertEqual("SP500 Top20 Updated", updated["name"])
+        self.assertEqual("Pilot subset updated", fetched["description"])
+        self.assertEqual(2, fetched["details"]["version"])
+
+    def test_universe_api_list_create_update(self) -> None:
+        app = self._make_app()
+        route_map = {
+            (route.path, tuple(sorted(getattr(route, "methods", [])))): route.endpoint
+            for route in app.routes
+            if hasattr(route, "endpoint")
+        }
+        list_endpoint = route_map[("/api/universes", ("GET",))]
+        create_endpoint = route_map[("/api/universes", ("POST",))]
+        update_endpoint = route_map[("/api/universes/{universe_id}", ("PATCH",))]
+
+        listed = list_endpoint()
+        self.assertEqual(2, len(listed))
+
+        created_body = create_endpoint(
+            UniverseCreate(
+                key="sp500_top20_api",
+                name="SP500 Top20 API",
+                symbols_file="symbols/sp500_120.txt",
+                description="API-created universe",
+                details={"source": "test"},
+            )
+        )
+        self.assertEqual(120, created_body["symbol_count"])
+
+        updated_body = update_endpoint(
+            int(created_body["id"]),
+            UniverseUpdate(name="SP500 Top20 API v2"),
+        )
+        self.assertEqual("SP500 Top20 API v2", updated_body["name"])
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)

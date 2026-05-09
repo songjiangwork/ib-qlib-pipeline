@@ -23,6 +23,8 @@ from .schemas import (
     RankingBackfillJobRequest,
     ScheduleCreate,
     ScheduleUpdate,
+    UniverseCreate,
+    UniverseUpdate,
 )
 from .service import BusyError, NotFoundError, RankingBackendService
 from .settings import Settings
@@ -72,6 +74,28 @@ def create_app() -> FastAPI:
     @app.get("/api/models")
     def get_models() -> list[dict[str, Any]]:
         return list_models(settings.db_path)
+
+    @app.get("/api/universes")
+    def get_universes() -> list[dict[str, Any]]:
+        return get_service().list_universes()
+
+    @app.get("/api/universes/{universe_id}")
+    def get_universe(universe_id: int) -> dict[str, Any]:
+        try:
+            return get_service().get_universe(universe_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/universes")
+    def create_universe(payload: UniverseCreate) -> dict[str, Any]:
+        return get_service().create_universe(payload.model_dump())
+
+    @app.patch("/api/universes/{universe_id}")
+    def update_universe(universe_id: int, payload: UniverseUpdate) -> dict[str, Any]:
+        try:
+            return get_service().update_universe(universe_id, payload.model_dump(exclude_none=True))
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/jobs")
     def get_jobs(limit: int = Query(default=30, ge=1, le=200)) -> list[dict[str, Any]]:

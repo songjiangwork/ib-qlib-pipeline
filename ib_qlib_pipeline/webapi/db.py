@@ -10,6 +10,7 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS models (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
     key TEXT NOT NULL UNIQUE,
     name TEXT NOT NULL,
     model_class TEXT NOT NULL,
@@ -41,10 +42,23 @@ CREATE TABLE IF NOT EXISTS schedules (
     last_run_status TEXT
 );
 
+CREATE TABLE IF NOT EXISTS universes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    key TEXT NOT NULL UNIQUE,
+    name TEXT NOT NULL,
+    symbols_file TEXT NOT NULL,
+    symbol_count INTEGER NOT NULL,
+    description TEXT,
+    details_json TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     schedule_id INTEGER REFERENCES schedules(id) ON DELETE SET NULL,
     model_id INTEGER REFERENCES models(id) ON DELETE SET NULL,
+    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
     trigger_source TEXT NOT NULL,
     status TEXT NOT NULL,
     client_id INTEGER NOT NULL,
@@ -78,6 +92,7 @@ CREATE TABLE IF NOT EXISTS recommendations (
 
 CREATE TABLE IF NOT EXISTS portfolio_runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL,
     name TEXT NOT NULL,
     strategy TEXT NOT NULL,
     buy_top_n INTEGER NOT NULL,
@@ -152,15 +167,18 @@ CREATE TABLE IF NOT EXISTS job_steps (
 
 CREATE INDEX IF NOT EXISTS idx_runs_created_at ON runs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_signal_date ON runs(signal_date DESC);
+CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC);
 CREATE INDEX IF NOT EXISTS idx_recommendations_run_id ON recommendations(run_id, rank);
 CREATE INDEX IF NOT EXISTS idx_recommendations_symbol_date ON recommendations(symbol, signal_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_runs_created_at ON portfolio_runs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_portfolio_runs_universe_id ON portfolio_runs(universe_id, end_signal_date DESC);
 CREATE INDEX IF NOT EXISTS idx_portfolio_lots_run_symbol ON portfolio_lots(portfolio_run_id, symbol, status);
 CREATE INDEX IF NOT EXISTS idx_portfolio_lots_entry_date ON portfolio_lots(entry_trade_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_marks_lot_date ON portfolio_marks(portfolio_lot_id, trade_date);
 CREATE INDEX IF NOT EXISTS idx_portfolio_marks_trade_date ON portfolio_marks(trade_date);
 CREATE INDEX IF NOT EXISTS idx_jobs_created_at ON jobs(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_steps_job_order ON job_steps(job_id, step_order);
+CREATE INDEX IF NOT EXISTS idx_models_universe_id ON models(universe_id, key);
 """
 
 
@@ -184,10 +202,39 @@ def _column_names(conn: sqlite3.Connection, table_name: str) -> set[str]:
 
 
 def _migrate_schema(conn: sqlite3.Connection) -> None:
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS universes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            key TEXT NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            symbols_file TEXT NOT NULL,
+            symbol_count INTEGER NOT NULL,
+            description TEXT,
+            details_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+
+    model_columns = _column_names(conn, "models")
+    if "universe_id" not in model_columns:
+        conn.execute("ALTER TABLE models ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_models_universe_id ON models(universe_id, key)")
+
     runs_columns = _column_names(conn, "runs")
     if "model_id" not in runs_columns:
         conn.execute("ALTER TABLE runs ADD COLUMN model_id INTEGER REFERENCES models(id) ON DELETE SET NULL")
+    if "universe_id" not in runs_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_model_id ON runs(model_id, signal_date DESC)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_runs_universe_id ON runs(universe_id, signal_date DESC)")
+
+    portfolio_run_columns = _column_names(conn, "portfolio_runs")
+    if "universe_id" not in portfolio_run_columns:
+        conn.execute("ALTER TABLE portfolio_runs ADD COLUMN universe_id INTEGER REFERENCES universes(id) ON DELETE SET NULL")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_portfolio_runs_universe_id ON portfolio_runs(universe_id, end_signal_date DESC)")
 
     schedule_columns = _column_names(conn, "schedules")
     if "schedule_type" not in schedule_columns:
