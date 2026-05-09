@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
+
+from sqlalchemy import select
+
+from ..dborm.models import PriceDaily
+from ..dborm.session import create_session_factory_for_path
 
 
 class PriceProvider(Protocol):
@@ -30,10 +34,8 @@ class PriceProvider(Protocol):
 class DailySqlitePriceProvider:
     db_path: Path
 
-    def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(str(self.db_path))
-        conn.row_factory = sqlite3.Row
-        return conn
+    def _session(self):
+        return create_session_factory_for_path(self.db_path)()
 
     def list_price_history(
         self,
@@ -42,18 +44,15 @@ class DailySqlitePriceProvider:
         start_date: dt.date | None = None,
         end_date: dt.date | None = None,
     ) -> list[dict[str, object]]:
-        query = "SELECT trade_date, close FROM prices_daily WHERE symbol = ?"
-        params: list[object] = [symbol]
+        query = select(PriceDaily.trade_date, PriceDaily.close).where(PriceDaily.symbol == symbol)
         if start_date is not None:
-            query += " AND trade_date >= ?"
-            params.append(start_date.isoformat())
+            query = query.where(PriceDaily.trade_date >= start_date.isoformat())
         if end_date is not None:
-            query += " AND trade_date <= ?"
-            params.append(end_date.isoformat())
-        query += " ORDER BY trade_date"
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
-        return [{"date": str(row["trade_date"]), "close": float(row["close"])} for row in rows]
+            query = query.where(PriceDaily.trade_date <= end_date.isoformat())
+        query = query.order_by(PriceDaily.trade_date)
+        with self._session() as session:
+            rows = session.execute(query).all()
+        return [{"date": str(trade_date), "close": float(close)} for trade_date, close in rows]
 
     def list_price_bars(
         self,
@@ -65,29 +64,32 @@ class DailySqlitePriceProvider:
     ) -> list[dict[str, object]]:
         if interval != "1d":
             raise ValueError(f"Unsupported interval: {interval}")
-        query = """
-            SELECT trade_date, open, high, low, close, volume
-            FROM prices_daily
-            WHERE symbol = ?
-        """
-        params: list[object] = [symbol]
+        query = (
+            select(
+                PriceDaily.trade_date,
+                PriceDaily.open,
+                PriceDaily.high,
+                PriceDaily.low,
+                PriceDaily.close,
+                PriceDaily.volume,
+            )
+            .where(PriceDaily.symbol == symbol)
+        )
         if start_date is not None:
-            query += " AND trade_date >= ?"
-            params.append(start_date.isoformat())
+            query = query.where(PriceDaily.trade_date >= start_date.isoformat())
         if end_date is not None:
-            query += " AND trade_date <= ?"
-            params.append(end_date.isoformat())
-        query += " ORDER BY trade_date"
-        with self._connect() as conn:
-            rows = conn.execute(query, params).fetchall()
+            query = query.where(PriceDaily.trade_date <= end_date.isoformat())
+        query = query.order_by(PriceDaily.trade_date)
+        with self._session() as session:
+            rows = session.execute(query).all()
         return [
             {
-                "time": str(row["trade_date"]),
-                "open": float(row["open"]),
-                "high": float(row["high"]),
-                "low": float(row["low"]),
-                "close": float(row["close"]),
-                "volume": float(row["volume"]) if row["volume"] is not None else None,
+                "time": str(trade_date),
+                "open": float(open_),
+                "high": float(high),
+                "low": float(low),
+                "close": float(close),
+                "volume": float(volume) if volume is not None else None,
             }
-            for row in rows
+            for trade_date, open_, high, low, close, volume in rows
         ]

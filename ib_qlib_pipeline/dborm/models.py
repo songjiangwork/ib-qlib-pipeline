@@ -253,3 +253,24 @@ class JobStep(Base):
     error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     job: Mapped[Job] = relationship(back_populates="steps")
+
+
+class PriceDaily(Base):
+    __tablename__ = "prices_daily"
+    __table_args__ = (
+        UniqueConstraint("symbol", "trade_date"),
+        Index("idx_prices_daily_symbol_date", "symbol", "trade_date"),
+        Index("idx_prices_daily_trade_date", "trade_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    trade_date: Mapped[str] = mapped_column(Text, nullable=False)
+    open: Mapped[float] = mapped_column(Float, nullable=False)
+    high: Mapped[float] = mapped_column(Float, nullable=False)
+    low: Mapped[float] = mapped_column(Float, nullable=False)
+    close: Mapped[float] = mapped_column(Float, nullable=False)
+    volume: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)

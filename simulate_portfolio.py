@@ -11,7 +11,7 @@ import pandas as pd
 
 from ib_qlib_pipeline.marketdata.daily_db import default_daily_db_path
 from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
-from ib_qlib_pipeline.webapi.db import connect, init_db
+from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.portfolio_store import (
     OpenLot,
     close_portfolio_lot,
@@ -20,8 +20,10 @@ from ib_qlib_pipeline.webapi.portfolio_store import (
     insert_portfolio_lot,
     insert_portfolio_mark,
     load_open_lots,
+    trade_date_has_existing_activity,
     update_portfolio_run_end_date,
 )
+from ib_qlib_pipeline.webapi.run_store import load_signal_map
 from ib_qlib_pipeline.webapi.settings import Settings
 from ib_qlib_pipeline.ranking.ranking_loader import read_available_trading_days
 
@@ -44,58 +46,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--target-notional", type=float, default=10000.0, help="Dollar notional per new lot")
     parser.add_argument("--notes", default=None, help="Optional notes stored with the portfolio run")
     return parser.parse_args()
-
-
-def load_signal_map(
-    db_path: Path,
-    start_date: str,
-    end_date: str | None,
-    model_id: int | None,
-) -> dict[str, dict]:
-    end_date_sql = end_date or "9999-12-31"
-    query = """
-        SELECT r.id AS run_id,
-               r.model_id,
-               r.signal_date,
-               rec.rank,
-               rec.symbol
-        FROM runs r
-        JOIN recommendations rec ON rec.run_id = r.id
-        JOIN (
-            SELECT signal_date, MAX(id) AS run_id
-            FROM runs
-            WHERE status = 'succeeded'
-              AND signal_date IS NOT NULL
-              AND signal_date BETWEEN ? AND ?
-              AND (? IS NULL OR model_id = ?)
-            GROUP BY signal_date
-        ) latest ON latest.run_id = r.id
-        WHERE r.signal_date BETWEEN ? AND ?
-        ORDER BY r.signal_date, rec.rank
-    """
-    signal_map: dict[str, dict] = {}
-    with connect(db_path) as conn:
-        rows = conn.execute(
-            query,
-            (start_date, end_date_sql, model_id, model_id, start_date, end_date_sql),
-        ).fetchall()
-    for row in rows:
-        signal_date = str(row["signal_date"])
-        bucket = signal_map.setdefault(
-            signal_date,
-            {
-                "run_id": int(row["run_id"]),
-                "model_id": int(row["model_id"]) if row["model_id"] is not None else None,
-                "top20": [],
-                "rank_map": {},
-            },
-        )
-        rank = int(row["rank"])
-        symbol = str(row["symbol"])
-        if rank <= 20:
-            bucket["top20"].append(symbol)
-        bucket["rank_map"][symbol] = rank
-    return signal_map
 
 
 @lru_cache(maxsize=1024)
@@ -137,31 +87,6 @@ def next_trade_date_map(trading_days: list[dt.date]) -> dict[dt.date, dt.date]:
     for left, right in zip(trading_days, trading_days[1:]):
         mapping[left] = right
     return mapping
-
-
-def trade_date_has_existing_activity(db_path: Path, portfolio_run_id: int, trade_date: dt.date) -> bool:
-    trade_date_str = trade_date.isoformat()
-    with connect(db_path) as conn:
-        row = conn.execute(
-            """
-            SELECT
-              EXISTS(
-                SELECT 1
-                FROM portfolio_marks pm
-                JOIN portfolio_lots pl ON pl.id = pm.portfolio_lot_id
-                WHERE pl.portfolio_run_id = ?
-                  AND pm.trade_date = ?
-              ) AS has_marks,
-              EXISTS(
-                SELECT 1
-                FROM portfolio_lots
-                WHERE portfolio_run_id = ?
-                  AND (entry_trade_date = ? OR exit_trade_date = ?)
-              ) AS has_trades
-            """,
-            (portfolio_run_id, trade_date_str, portfolio_run_id, trade_date_str, trade_date_str),
-        ).fetchone()
-    return bool(row["has_marks"]) or bool(row["has_trades"])
 
 
 def updated_run_name(existing_name: str, end_signal_date: dt.date) -> str:
@@ -212,7 +137,12 @@ def simulate() -> None:
                 f"but --model-id={args.model_id} was provided"
             )
 
-    signal_map = load_signal_map(settings.db_path, start_date.isoformat(), end_date.isoformat() if end_date else None, args.model_id)
+    signal_map = load_signal_map(
+        settings.db_path,
+        start_date=start_date.isoformat(),
+        end_date=end_date.isoformat() if end_date else None,
+        model_id=args.model_id,
+    )
     if not signal_map:
         raise SystemExit("No ranking runs found in DB for the selected signal date range")
 

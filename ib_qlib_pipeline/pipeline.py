@@ -14,6 +14,8 @@ import pandas as pd
 import yaml
 from ib_insync import Contract, IB, Stock, util
 
+from .marketdata.daily_db import default_daily_db_path, import_daily_price_frame, init_daily_market_db
+
 
 @dataclass
 class IBConfig:
@@ -464,8 +466,11 @@ def run() -> int:
     qlib_csv_dir = (project_root / cfg.output.qlib_csv_dir).resolve()
     qlib_bin_dir = (project_root / cfg.output.qlib_bin_dir).resolve()
     metadata_dir = root_dir / "raw" / "company_meta"
+    daily_market_db = default_daily_db_path(project_root)
 
     _ensure_dirs([root_dir, raw_prices_dir, raw_news_dir, qlib_csv_dir, qlib_bin_dir, metadata_dir])
+    if cfg.data.bar_size == "1 day":
+        init_daily_market_db(daily_market_db)
 
     report_messages: list[str] = []
 
@@ -534,6 +539,14 @@ def run() -> int:
                 else:
                     _write_symbol_csv(merged, raw_price_path)
                     _write_symbol_csv(merged, qlib_price_path)
+                    if cfg.data.bar_size == "1 day":
+                        synced_rows = import_daily_price_frame(
+                            daily_market_db,
+                            merged,
+                            symbol=qlib_symbol,
+                            source="pipeline",
+                        )
+                        _log(f"[info] synced daily sqlite: {qlib_symbol} rows={synced_rows}", report_messages)
                     _write_metadata_cache(metadata_dir, qlib_symbol, metadata)
                     _log(f"[info] wrote prices: {raw_price_path}", report_messages)
                     _log(f"[info] wrote qlib csv: {qlib_price_path}", report_messages)

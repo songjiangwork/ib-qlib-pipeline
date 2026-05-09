@@ -444,6 +444,61 @@ def latest_backfill_signal_date_for_model(db_path: Path, model_id: int) -> dt.da
         session.close()
 
 
+def load_signal_map(
+    db_path: Path,
+    *,
+    start_date: str,
+    end_date: str | None,
+    model_id: int | None,
+) -> dict[str, dict[str, Any]]:
+    session_factory = create_session_factory_for_path(db_path)
+    session = session_factory()
+    try:
+        end_date_sql = end_date or "9999-12-31"
+        latest_ids = select(
+            Run.signal_date.label("signal_date"),
+            func.max(Run.id).label("run_id"),
+        ).where(
+            Run.status == "succeeded",
+            Run.signal_date.is_not(None),
+            Run.signal_date.between(start_date, end_date_sql),
+        )
+        if model_id is not None:
+            latest_ids = latest_ids.where(Run.model_id == model_id)
+        latest_ids = latest_ids.group_by(Run.signal_date).subquery()
+
+        rows = session.execute(
+            select(
+                Run.id.label("run_id"),
+                Run.model_id.label("model_id"),
+                Run.signal_date.label("signal_date"),
+                Recommendation.rank.label("rank"),
+                Recommendation.symbol.label("symbol"),
+            )
+            .join(latest_ids, latest_ids.c.run_id == Run.id)
+            .join(Recommendation, Recommendation.run_id == Run.id)
+            .where(Run.signal_date.between(start_date, end_date_sql))
+            .order_by(Run.signal_date, Recommendation.rank)
+        ).all()
+        signal_map: dict[str, dict[str, Any]] = {}
+        for run_id, run_model_id, signal_date, rank, symbol in rows:
+            bucket = signal_map.setdefault(
+                str(signal_date),
+                {
+                    "run_id": int(run_id),
+                    "model_id": int(run_model_id) if run_model_id is not None else None,
+                    "top20": [],
+                    "rank_map": {},
+                },
+            )
+            if int(rank) <= 20:
+                bucket["top20"].append(str(symbol))
+            bucket["rank_map"][str(symbol)] = int(rank)
+        return signal_map
+    finally:
+        session.close()
+
+
 def mark_run_failed(
     db_path: Path,
     run_id: int,

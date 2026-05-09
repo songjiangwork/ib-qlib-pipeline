@@ -11,6 +11,7 @@ from ib_qlib_pipeline.marketdata.daily_db import (
     DailyPriceStore,
     default_daily_db_path,
     import_daily_csv_file,
+    import_daily_price_frame,
     init_daily_market_db,
 )
 from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
@@ -53,6 +54,15 @@ class MarketDataTestCase(unittest.TestCase):
         with sqlite3.connect(self.db_path) as conn:
             total = conn.execute("SELECT COUNT(*) FROM prices_daily WHERE symbol = 'TEST'").fetchone()[0]
         self.assertEqual(2, total)
+
+    def test_import_daily_price_frame(self) -> None:
+        frame = simulate_portfolio.load_price_frame(str(self.project_root), "TEST")
+        inserted = import_daily_price_frame(self.db_path, frame, symbol="TEST", source="pipeline")
+        self.assertEqual(2, inserted)
+        provider = DailySqlitePriceProvider(self.db_path)
+        history = provider.list_price_history(symbol="TEST")
+        self.assertEqual(2, len(history))
+        self.assertEqual(11.5, history[-1]["close"])
 
     def test_daily_sqlite_price_provider(self) -> None:
         import_daily_csv_file(self.db_path, self.csv_path, symbol="TEST")

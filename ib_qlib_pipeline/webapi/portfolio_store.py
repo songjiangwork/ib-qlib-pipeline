@@ -358,3 +358,28 @@ def list_portfolio_marks(db_path: Path, lot_id: int) -> list[dict[str, Any]]:
             .order_by(PortfolioMark.trade_date)
         ).scalars().all()
     return [_mark_to_dict(row) for row in rows]
+
+
+def trade_date_has_existing_activity(db_path: Path, portfolio_run_id: int, trade_date: dt.date) -> bool:
+    trade_date_str = trade_date.isoformat()
+    with _session_for_db(db_path) as session:
+        has_marks = session.execute(
+            select(PortfolioMark.id)
+            .join(PortfolioLot, PortfolioLot.id == PortfolioMark.portfolio_lot_id)
+            .where(
+                PortfolioLot.portfolio_run_id == portfolio_run_id,
+                PortfolioMark.trade_date == trade_date_str,
+            )
+            .limit(1)
+        ).first()
+        if has_marks is not None:
+            return True
+        has_trades = session.execute(
+            select(PortfolioLot.id)
+            .where(
+                PortfolioLot.portfolio_run_id == portfolio_run_id,
+                (PortfolioLot.entry_trade_date == trade_date_str) | (PortfolioLot.exit_trade_date == trade_date_str),
+            )
+            .limit(1)
+        ).first()
+        return has_trades is not None
