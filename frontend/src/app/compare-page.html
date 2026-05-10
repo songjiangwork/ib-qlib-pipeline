@@ -1,4 +1,26 @@
 <section class="page">
+  <section class="context-bar panel">
+    <div class="context-grid">
+      <label class="field field-wide">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
+          @for (run of state.portfolioRuns(); track run.id) {
+            <option [value]="run.id">#{{ run.id }} {{ run.name }} · {{ run.model_name || 'N/A' }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field">
+        <span>{{ i18n.t('searchSymbol') }}</span>
+        <input
+          type="text"
+          [placeholder]="i18n.t('searchSymbol')"
+          (input)="setSymbolFilter($any($event.target).value)"
+        />
+      </label>
+    </div>
+  </section>
+
   <div class="page-head">
     <div>
       <p class="eyebrow">{{ i18n.t('compareStocks') }}</p>
@@ -112,7 +134,7 @@
       </p>
       <p class="muted">{{ i18n.t('compareHint') }}</p>
       <div class="chip-list">
-        @for (symbol of state.symbolsInRun(); track symbol) {
+        @for (symbol of filteredSymbolsInRun(); track symbol) {
           <button
             type="button"
             class="chip"

@@ -20,12 +20,28 @@ export class DailyRankingsPage {
     'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest'
   >('rank');
   private readonly sortDirection = signal<'asc' | 'desc'>('asc');
+  protected readonly sortedRankingDates = computed(() =>
+    [...this.state.rankingDates()].sort((a, b) => b.signal_date.localeCompare(a.signal_date)),
+  );
+  protected readonly canGoPreviousTradingDay = computed(() => {
+    const index = this.selectedRankingIndex();
+    return index >= 0 && index < this.sortedRankingDates().length - 1;
+  });
+  protected readonly canGoNextTradingDay = computed(() => this.selectedRankingIndex() > 0);
 
   protected readonly top20 = computed(() => {
     const rows = (this.state.selectedRunData()?.recommendations ?? []).filter((row) => row.rank <= 20);
     const symbolFilter = this.state.symbolFilter().trim().toUpperCase();
     const filtered = symbolFilter ? rows.filter((row) => row.symbol.includes(symbolFilter)) : rows;
     return [...filtered].sort((a, b) => this.compareRows(a, b));
+  });
+
+  private readonly selectedRankingIndex = computed(() => {
+    const runId = this.state.selectedRankingRunId();
+    if (runId === null) {
+      return -1;
+    }
+    return this.sortedRankingDates().findIndex((item) => item.run_id === runId);
   });
 
   protected toggleSort(
@@ -51,6 +67,38 @@ export class DailyRankingsPage {
   protected async openSymbol(symbol: string): Promise<void> {
     await this.state.loadSymbolLifecycle(symbol);
     await this.router.navigate(['/symbols', symbol]);
+  }
+
+  protected async onPortfolioRunChange(value: string): Promise<void> {
+    const portfolioRunId = Number(value);
+    if (!Number.isFinite(portfolioRunId) || portfolioRunId <= 0) {
+      return;
+    }
+    await this.state.selectPortfolioRun(portfolioRunId);
+  }
+
+  protected async onRankingRunChange(value: string): Promise<void> {
+    const runId = Number(value);
+    if (!Number.isFinite(runId) || runId <= 0) {
+      return;
+    }
+    await this.state.selectRankingRun(runId);
+  }
+
+  protected async goPreviousTradingDay(): Promise<void> {
+    const index = this.selectedRankingIndex();
+    if (index < 0 || index >= this.sortedRankingDates().length - 1) {
+      return;
+    }
+    await this.state.selectRankingRun(this.sortedRankingDates()[index + 1].run_id);
+  }
+
+  protected async goNextTradingDay(): Promise<void> {
+    const index = this.selectedRankingIndex();
+    if (index <= 0) {
+      return;
+    }
+    await this.state.selectRankingRun(this.sortedRankingDates()[index - 1].run_id);
   }
 
   private compareRows(

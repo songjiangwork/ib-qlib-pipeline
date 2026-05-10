@@ -44,10 +44,17 @@ export class ComparePage {
   protected readonly state = inject(FrontendStateService);
   protected readonly i18n = inject(FrontendI18nService);
   private readonly router = inject(Router);
+  private readonly symbolFilter = signal('');
   private readonly runSortKey = signal<keyof PortfolioRunRow>('totalRealizedPnl');
   private readonly runSortDirection = signal<'asc' | 'desc'>('desc');
   private readonly symbolSortKey = signal<keyof CompareRow>('totalRealizedPnl');
   private readonly symbolSortDirection = signal<'asc' | 'desc'>('desc');
+
+  protected readonly filteredSymbolsInRun = computed(() => {
+    const filter = this.symbolFilter().trim().toUpperCase();
+    const symbols = this.state.symbolsInRun();
+    return filter ? symbols.filter((symbol) => symbol.includes(filter)) : symbols;
+  });
 
   protected readonly compareRows = computed(() => {
     return this.state.compareSymbols()
@@ -91,6 +98,18 @@ export class ComparePage {
 
   protected async selectPortfolioRun(portfolioRunId: number): Promise<void> {
     await this.state.selectPortfolioRun(portfolioRunId);
+  }
+
+  protected async onPortfolioRunChange(value: string): Promise<void> {
+    const portfolioRunId = Number(value);
+    if (!Number.isFinite(portfolioRunId) || portfolioRunId <= 0) {
+      return;
+    }
+    await this.selectPortfolioRun(portfolioRunId);
+  }
+
+  protected setSymbolFilter(value: string): void {
+    this.symbolFilter.set(value);
   }
 
   protected toggleRunSort(key: keyof PortfolioRunRow): void {

@@ -1,4 +1,37 @@
 <section class="page">
+  <section class="context-bar panel">
+    <div class="context-grid">
+      <label class="field">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
+          @for (run of state.portfolioRuns(); track run.id) {
+            <option [value]="run.id">#{{ run.id }} {{ run.name }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field field-wide">
+        <span>{{ i18n.t('rankingDates') }}</span>
+        <select [value]="state.selectedRankingRunId() || ''" (change)="onRankingRunChange($any($event.target).value)">
+          @for (run of sortedRankingDates(); track run.run_id) {
+            <option [value]="run.run_id">
+              {{ run.signal_date || 'N/A' }} · #{{ run.run_id }} · {{ run.model_name || 'N/A' }}
+            </option>
+          }
+        </select>
+      </label>
+    </div>
+
+    <div class="context-actions">
+      <button type="button" class="action-button" (click)="goPreviousTradingDay()" [disabled]="!canGoPreviousTradingDay()">
+        {{ i18n.t('previousTradingDay') }}
+      </button>
+      <button type="button" class="action-button" (click)="goNextTradingDay()" [disabled]="!canGoNextTradingDay()">
+        {{ i18n.t('nextTradingDay') }}
+      </button>
+    </div>
+  </section>
+
   <div class="page-head">
     <div>
       <p class="eyebrow">{{ i18n.t('byDay') }}</p>

@@ -1,7 +1,7 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
 import { Component, ElementRef, ViewChild, computed, effect, inject, signal } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 import {
   CandlestickSeries,
   ColorType,
@@ -44,6 +44,7 @@ export class SymbolDetailPage {
   protected readonly i18n = inject(FrontendI18nService);
   protected readonly state = inject(FrontendStateService);
   private readonly route = inject(ActivatedRoute);
+  private readonly router = inject(Router);
   private readonly routeSymbol = toSignal(
     this.route.paramMap.pipe(map((params) => params.get('symbol'))),
     { initialValue: this.route.snapshot.paramMap.get('symbol') },
@@ -208,6 +209,32 @@ export class SymbolDetailPage {
     await this.state.setPriceInterval(interval);
   }
 
+  protected async onPortfolioRunChange(value: string): Promise<void> {
+    const portfolioRunId = Number(value);
+    if (!Number.isFinite(portfolioRunId) || portfolioRunId <= 0) {
+      return;
+    }
+    await this.state.selectPortfolioRun(portfolioRunId);
+    const currentSymbol = this.routeSymbol();
+    const nextSymbol =
+      currentSymbol && this.state.symbolsInRun().includes(currentSymbol)
+        ? currentSymbol
+        : this.state.symbolsInRun()[0] ?? null;
+    if (nextSymbol) {
+      await this.state.loadSymbolLifecycle(nextSymbol);
+      await this.router.navigate(['/symbols', nextSymbol]);
+    }
+  }
+
+  protected async onSymbolChange(value: string): Promise<void> {
+    const symbol = value.trim().toUpperCase();
+    if (!symbol) {
+      return;
+    }
+    await this.state.loadSymbolLifecycle(symbol);
+    await this.router.navigate(['/symbols', symbol]);
+  }
+
   protected setRange(range: ChartRange): void {
     this.selectedRange.set(range);
     this.applyVisibleRange();
@@ -256,30 +283,30 @@ export class SymbolDetailPage {
       autoSize: true,
       height: 420,
       layout: {
-        background: { type: ColorType.Solid, color: '#fffaf2' },
-        textColor: '#5b5447',
+        background: { type: ColorType.Solid, color: '#0d1727' },
+        textColor: '#d7e3f8',
       },
       grid: {
-        vertLines: { color: 'rgba(28, 28, 28, 0.08)' },
-        horzLines: { color: 'rgba(28, 28, 28, 0.08)' },
+        vertLines: { color: 'rgba(151, 178, 219, 0.12)' },
+        horzLines: { color: 'rgba(151, 178, 219, 0.12)' },
       },
       rightPriceScale: {
         visible: true,
-        borderColor: 'rgba(28, 28, 28, 0.18)',
+        borderColor: 'rgba(151, 178, 219, 0.2)',
         mode: PriceScaleMode.Normal,
       },
       leftPriceScale: {
         visible: true,
-        borderColor: 'rgba(28, 28, 28, 0.18)',
+        borderColor: 'rgba(151, 178, 219, 0.2)',
         mode: PriceScaleMode.Percentage,
       },
       timeScale: {
-        borderColor: 'rgba(28, 28, 28, 0.18)',
+        borderColor: 'rgba(151, 178, 219, 0.2)',
         timeVisible: true,
       },
       crosshair: {
-        vertLine: { color: 'rgba(12, 122, 90, 0.35)' },
-        horzLine: { color: 'rgba(12, 122, 90, 0.35)' },
+        vertLine: { color: 'rgba(81, 203, 255, 0.35)' },
+        horzLine: { color: 'rgba(81, 203, 255, 0.35)' },
       },
       localization: {
         priceFormatter: (price: number) => price.toFixed(2),

@@ -1,4 +1,26 @@
 <section class="page">
+  <section class="context-bar panel">
+    <div class="context-grid">
+      <label class="field">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
+          @for (run of state.portfolioRuns(); track run.id) {
+            <option [value]="run.id">#{{ run.id }} {{ run.name }} · {{ run.model_name || 'N/A' }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field">
+        <span>{{ i18n.t('symbol') }}</span>
+        <select [value]="lifecycle()?.symbol || ''" (change)="onSymbolChange($any($event.target).value)">
+          @for (symbol of state.symbolsInRun(); track symbol) {
+            <option [value]="symbol">{{ symbol }}</option>
+          }
+        </select>
+      </label>
+    </div>
+  </section>
+
   <div class="page-head">
     <div>
       <p class="eyebrow">{{ i18n.t('bySymbol') }}</p>

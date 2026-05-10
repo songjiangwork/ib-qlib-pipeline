@@ -580,6 +580,7 @@ export class FrontendStateService {
       const symbols = new Set((lots ?? []).map((lot) => lot.symbol));
       this.compareSymbols.set(this.compareSymbols().filter((symbol) => symbols.has(symbol)));
       await this.loadRankingDates(true);
+      await this.ensureAllRankingDatesLoaded();
       const selectedModelId = this.selectedPortfolioRun()?.model_id ?? null;
       const selectedRunModelId = this.selectedRunData()?.run?.model_id ?? null;
       const currentRunStillVisible = this.rankingDates().some(
@@ -598,6 +599,12 @@ export class FrontendStateService {
       this.portfolioLots.set([]);
       this.compareSymbols.set([]);
       this.detailError.set(this.i18n.t('failedPortfolioLots'));
+    }
+  }
+
+  async ensureAllRankingDatesLoaded(): Promise<void> {
+    while (this.rankingDatesHasMore() && !this.rankingDatesLoading()) {
+      await this.loadRankingDates(false);
     }
   }
 
