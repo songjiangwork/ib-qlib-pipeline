@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import re
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
@@ -33,6 +34,30 @@ def status(message: str) -> None:
     print(message, flush=True)
 
 
+@dataclass
+class StrategyRuntimeConfig:
+    strategy_id: int | None
+    strategy_key: str
+    strategy_name: str
+    strategy_type: str
+    buy_top_n: int
+    hold_top_n: int
+    target_notional: float
+    signal_timing: str
+    execution_timing: str
+    trade_price_basis: str
+    max_open_positions: int | None = None
+    max_position_notional: float | None = None
+    max_position_pct: float | None = None
+    initial_capital: float | None = None
+    fee_bps: float | None = None
+    slippage_bps: float | None = None
+    gap_up_limit_pct: float | None = None
+    gap_down_limit_pct: float | None = None
+    allow_reentry: bool | None = None
+    snapshot: dict[str, object] | None = None
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Simulate per-stock lots using T-1 rankings and T open execution.",
@@ -42,6 +67,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--name", default=None, help="Optional portfolio run label")
     parser.add_argument("--append-run-id", type=int, default=None, help="Append new signal days into an existing portfolio run")
     parser.add_argument("--model-id", type=int, default=None, help="Only simulate rankings from the specified model id")
+    parser.add_argument("--strategy-key", default=None, help="Optional registered strategy key to apply for a new portfolio run")
     parser.add_argument("--buy-top-n", type=int, default=10, help="Buy new symbols from top N each signal day")
     parser.add_argument("--hold-top-n", type=int, default=20, help="Continue holding while symbol stays within top N")
     parser.add_argument("--target-notional", type=float, default=10000.0, help="Dollar notional per new lot")
@@ -94,6 +120,131 @@ def updated_run_name(existing_name: str, end_signal_date: dt.date) -> str:
     return re.sub(r"\d{4}-\d{2}-\d{2}$", end_signal_date.isoformat(), existing_name)
 
 
+def strategy_config_from_snapshot(snapshot: dict[str, object] | None, *, fallback_name: str) -> StrategyRuntimeConfig | None:
+    if not snapshot:
+        return None
+    buy_top_n = snapshot.get("buy_top_n")
+    hold_top_n = snapshot.get("hold_top_n")
+    target_notional = snapshot.get("target_notional")
+    if buy_top_n is None or hold_top_n is None or target_notional is None:
+        return None
+    return StrategyRuntimeConfig(
+        strategy_id=int(snapshot["strategy_id"]) if snapshot.get("strategy_id") is not None else None,
+        strategy_key=str(snapshot.get("strategy_key") or "snapshot"),
+        strategy_name=str(snapshot.get("strategy_name") or fallback_name),
+        strategy_type=str(snapshot.get("strategy_type") or "ranking_hold_band"),
+        buy_top_n=int(buy_top_n),
+        hold_top_n=int(hold_top_n),
+        target_notional=float(target_notional),
+        signal_timing=str(snapshot.get("signal_timing") or "t_close"),
+        execution_timing=str(snapshot.get("execution_timing") or "t_plus_1_open"),
+        trade_price_basis=str(snapshot.get("trade_price_basis") or "open"),
+        max_open_positions=int(snapshot["max_open_positions"]) if snapshot.get("max_open_positions") is not None else None,
+        max_position_notional=float(snapshot["max_position_notional"]) if snapshot.get("max_position_notional") is not None else None,
+        max_position_pct=float(snapshot["max_position_pct"]) if snapshot.get("max_position_pct") is not None else None,
+        initial_capital=float(snapshot["initial_capital"]) if snapshot.get("initial_capital") is not None else None,
+        fee_bps=float(snapshot["fee_bps"]) if snapshot.get("fee_bps") is not None else None,
+        slippage_bps=float(snapshot["slippage_bps"]) if snapshot.get("slippage_bps") is not None else None,
+        gap_up_limit_pct=float(snapshot["gap_up_limit_pct"]) if snapshot.get("gap_up_limit_pct") is not None else None,
+        gap_down_limit_pct=float(snapshot["gap_down_limit_pct"]) if snapshot.get("gap_down_limit_pct") is not None else None,
+        allow_reentry=bool(snapshot["allow_reentry"]) if snapshot.get("allow_reentry") is not None else None,
+        snapshot=dict(snapshot),
+    )
+
+
+def resolve_strategy_runtime(
+    *,
+    db_path: Path,
+    run_name: str,
+    strategy_key: str | None,
+    buy_top_n: int,
+    hold_top_n: int,
+    target_notional: float,
+) -> StrategyRuntimeConfig:
+    registered = get_strategy_by_key(db_path, strategy_key) if strategy_key else None
+    if registered is None and strategy_key is None and buy_top_n == 10 and hold_top_n == 20 and abs(float(target_notional) - 10000.0) < 1e-9:
+        registered = get_strategy_by_key(db_path, "top10_hold20_default")
+    if registered is not None:
+        snapshot = strategy_snapshot_for_portfolio(db_path, int(registered["id"]))
+        return strategy_config_from_snapshot(snapshot, fallback_name=run_name) or StrategyRuntimeConfig(
+            strategy_id=int(registered["id"]),
+            strategy_key=str(registered["key"]),
+            strategy_name=str(registered["name"]),
+            strategy_type=str(registered["strategy_type"]),
+            buy_top_n=int(registered["buy_top_n"]),
+            hold_top_n=int(registered["hold_top_n"]),
+            target_notional=float(registered["target_notional"]),
+            signal_timing=str(registered.get("signal_timing") or "t_close"),
+            execution_timing=str(registered.get("execution_timing") or "t_plus_1_open"),
+            trade_price_basis=str(registered.get("trade_price_basis") or "open"),
+            max_open_positions=int(registered["max_open_positions"]) if registered.get("max_open_positions") is not None else None,
+            max_position_notional=float(registered["max_position_notional"]) if registered.get("max_position_notional") is not None else None,
+            max_position_pct=float(registered["max_position_pct"]) if registered.get("max_position_pct") is not None else None,
+            initial_capital=float(registered["initial_capital"]) if registered.get("initial_capital") is not None else None,
+            fee_bps=float(registered["fee_bps"]) if registered.get("fee_bps") is not None else None,
+            slippage_bps=float(registered["slippage_bps"]) if registered.get("slippage_bps") is not None else None,
+            gap_up_limit_pct=float(registered["gap_up_limit_pct"]) if registered.get("gap_up_limit_pct") is not None else None,
+            gap_down_limit_pct=float(registered["gap_down_limit_pct"]) if registered.get("gap_down_limit_pct") is not None else None,
+            allow_reentry=bool(registered["allow_reentry"]) if registered.get("allow_reentry") is not None else None,
+            snapshot=snapshot,
+        )
+    snapshot = {
+        "strategy_key": strategy_key or "ad_hoc",
+        "strategy_name": run_name,
+        "strategy_type": "ranking_hold_band",
+        "buy_top_n": buy_top_n,
+        "hold_top_n": hold_top_n,
+        "target_notional": target_notional,
+        "signal_timing": "t_close",
+        "execution_timing": "t_plus_1_open",
+        "trade_price_basis": "open",
+    }
+    return strategy_config_from_snapshot(snapshot, fallback_name=run_name)  # type: ignore[return-value]
+
+
+def capped_target_notional(strategy: StrategyRuntimeConfig) -> float:
+    value = float(strategy.target_notional)
+    if strategy.max_position_notional is not None:
+        value = min(value, float(strategy.max_position_notional))
+    if strategy.initial_capital is not None and strategy.max_position_pct is not None:
+        pct_cap = float(strategy.initial_capital) * float(strategy.max_position_pct) / 100.0
+        value = min(value, pct_cap)
+    return value
+
+
+def adjusted_execution_price(raw_price: float, *, side: str, strategy: StrategyRuntimeConfig) -> float:
+    adjustment_bps = float(strategy.slippage_bps or 0.0) + float(strategy.fee_bps or 0.0)
+    if adjustment_bps == 0:
+        return raw_price
+    factor = 1.0 + adjustment_bps / 10000.0 if side == "buy" else 1.0 - adjustment_bps / 10000.0
+    return raw_price * factor
+
+
+def previous_close(project_root: Path, symbol: str, trade_date: dt.date) -> float | None:
+    try:
+        frame = load_price_frame(str(project_root), symbol)
+    except FileNotFoundError:
+        return None
+    history = frame.loc[frame["date"] < trade_date, "close"]
+    if history.empty:
+        return None
+    return float(history.iloc[-1])
+
+
+def blocked_by_gap_filter(project_root: Path, symbol: str, trade_date: dt.date, entry_open: float, strategy: StrategyRuntimeConfig) -> bool:
+    if strategy.gap_up_limit_pct is None and strategy.gap_down_limit_pct is None:
+        return False
+    prev_close = previous_close(project_root, symbol, trade_date)
+    if prev_close is None or prev_close <= 0:
+        return False
+    gap_pct = ((entry_open / prev_close) - 1.0) * 100.0
+    if strategy.gap_up_limit_pct is not None and gap_pct > float(strategy.gap_up_limit_pct):
+        return True
+    if strategy.gap_down_limit_pct is not None and gap_pct < float(strategy.gap_down_limit_pct):
+        return True
+    return False
+
+
 def simulate() -> None:
     args = parse_args()
     settings = Settings.load()
@@ -128,9 +279,19 @@ def simulate() -> None:
                 f"already covers requested range ending at {end_date.isoformat()}"
             )
 
-        args.buy_top_n = int(existing_run["buy_top_n"])
-        args.hold_top_n = int(existing_run["hold_top_n"])
-        args.target_notional = float(existing_run["target_notional"])
+        existing_strategy = strategy_config_from_snapshot(existing_run.get("strategy_config"), fallback_name=existing_run_name)
+        if existing_strategy is None:
+            existing_strategy = resolve_strategy_runtime(
+                db_path=settings.db_path,
+                run_name=existing_run_name,
+                strategy_key=None,
+                buy_top_n=int(existing_run["buy_top_n"]),
+                hold_top_n=int(existing_run["hold_top_n"]),
+                target_notional=float(existing_run["target_notional"]),
+            )
+        args.buy_top_n = existing_strategy.buy_top_n
+        args.hold_top_n = existing_strategy.hold_top_n
+        args.target_notional = existing_strategy.target_notional
         if args.model_id is None:
             args.model_id = int(existing_run["model_id"]) if existing_run.get("model_id") is not None else None
         elif existing_run.get("model_id") is not None and int(existing_run["model_id"]) != int(args.model_id):
@@ -154,6 +315,7 @@ def simulate() -> None:
     if append_run_id is not None:
         portfolio_run_id = append_run_id
         open_lots = load_open_lots(settings.db_path, portfolio_run_id)
+        strategy_runtime = existing_strategy
         status(
             f"[info] appending portfolio_run_id={portfolio_run_id} "
             f"from {start_date.isoformat()} to {end_date.isoformat()} "
@@ -165,35 +327,23 @@ def simulate() -> None:
             args.name
             or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
         )
-        default_strategy = None
-        strategy_id = None
-        strategy_config = {
-            "strategy_key": "ad_hoc",
-            "strategy_name": run_name,
-            "strategy_type": "ranking_hold_band",
-            "buy_top_n": args.buy_top_n,
-            "hold_top_n": args.hold_top_n,
-            "target_notional": args.target_notional,
-            "signal_timing": "t_close",
-            "execution_timing": "t_plus_1_open",
-            "trade_price_basis": "open",
-        }
-        if args.buy_top_n == 10 and args.hold_top_n == 20 and abs(float(args.target_notional) - 10000.0) < 1e-9:
-            default_strategy = get_strategy_by_key(settings.db_path, "top10_hold20_default")
-            if default_strategy is not None:
-                strategy_id = int(default_strategy["id"])
-                snapshot = strategy_snapshot_for_portfolio(settings.db_path, strategy_id)
-                if snapshot is not None:
-                    strategy_config = snapshot
-        portfolio_run_id = create_portfolio_run(
+        strategy_runtime = resolve_strategy_runtime(
             db_path=settings.db_path,
-            name=run_name,
-            strategy_id=strategy_id,
-            strategy="t_minus_1_rank__t_open_execute",
-            strategy_config=strategy_config,
+            run_name=run_name,
+            strategy_key=args.strategy_key,
             buy_top_n=args.buy_top_n,
             hold_top_n=args.hold_top_n,
             target_notional=args.target_notional,
+        )
+        portfolio_run_id = create_portfolio_run(
+            db_path=settings.db_path,
+            name=run_name,
+            strategy_id=strategy_runtime.strategy_id,
+            strategy="t_minus_1_rank__t_open_execute",
+            strategy_config=strategy_runtime.snapshot,
+            buy_top_n=strategy_runtime.buy_top_n,
+            hold_top_n=strategy_runtime.hold_top_n,
+            target_notional=strategy_runtime.target_notional,
             start_signal_date=args.start_date,
             end_signal_date=end_date.isoformat(),
             notes=args.notes,
@@ -220,8 +370,8 @@ def simulate() -> None:
 
         bucket = signal_map[signal_date.isoformat()]
         run_id = int(bucket["run_id"])
-        top20 = list(bucket["top20"])[: args.hold_top_n]
-        top10 = top20[: args.buy_top_n]
+        top20 = list(bucket["top20"])[: strategy_runtime.hold_top_n]
+        top10 = top20[: strategy_runtime.buy_top_n]
         top20_set = set(top20)
         top10_set = set(top10)
         rank_map = dict(bucket["rank_map"])
@@ -229,10 +379,11 @@ def simulate() -> None:
         for symbol, lots in list(open_lots.items()):
             if symbol in top20_set:
                 continue
-            exit_price = get_price(project_root, symbol, trade_date, "open")
-            if exit_price is None:
+            raw_exit_price = get_price(project_root, symbol, trade_date, "open")
+            if raw_exit_price is None:
                 status(f"[warn] missing open price for sell {symbol} on {trade_date.isoformat()}, keeping lot open")
                 continue
+            exit_price = adjusted_execution_price(raw_exit_price, side="sell", strategy=strategy_runtime)
             for lot in lots:
                 close_portfolio_lot(
                     db_path=settings.db_path,
@@ -248,11 +399,18 @@ def simulate() -> None:
         for symbol in top10:
             if symbol in open_lots:
                 continue
-            entry_price = get_price(project_root, symbol, trade_date, "open")
-            if entry_price is None or entry_price <= 0:
+            if strategy_runtime.max_open_positions is not None and sum(len(v) for v in open_lots.values()) >= strategy_runtime.max_open_positions:
+                break
+            raw_entry_price = get_price(project_root, symbol, trade_date, "open")
+            if raw_entry_price is None or raw_entry_price <= 0:
                 status(f"[warn] missing open price for buy {symbol} on {trade_date.isoformat()}, skipping")
                 continue
-            shares = int(args.target_notional // entry_price)
+            if blocked_by_gap_filter(project_root, symbol, trade_date, raw_entry_price, strategy_runtime):
+                status(f"[skip] gap filter blocked buy {symbol} on {trade_date.isoformat()}")
+                continue
+            entry_price = adjusted_execution_price(raw_entry_price, side="buy", strategy=strategy_runtime)
+            effective_target_notional = capped_target_notional(strategy_runtime)
+            shares = int(effective_target_notional // entry_price)
             if shares <= 0:
                 status(f"[warn] zero shares for {symbol} on {trade_date.isoformat()} at price {entry_price}")
                 continue
@@ -266,7 +424,7 @@ def simulate() -> None:
                 entry_rank=int(rank_map.get(symbol, 9999)),
                 entry_price_open=entry_price,
                 shares=shares,
-                target_notional=args.target_notional,
+                target_notional=effective_target_notional,
             )
             open_lots[symbol] = [
                 OpenLot(
@@ -278,7 +436,7 @@ def simulate() -> None:
                     entry_rank=int(rank_map.get(symbol, 9999)),
                     entry_price_open=entry_price,
                     shares=shares,
-                    target_notional=args.target_notional,
+                    target_notional=effective_target_notional,
                 )
             ]
 

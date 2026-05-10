@@ -16,6 +16,7 @@ from ib_qlib_pipeline.marketdata.daily_db import (
 )
 from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
 from ib_qlib_pipeline.webapi.db import init_db
+from ib_qlib_pipeline.webapi.strategy_store import ensure_default_strategies
 from ib_qlib_pipeline.webapi.universe_store import ensure_default_universes
 from ib_qlib_pipeline.webapi.price_store import list_price_bars, list_price_history
 
@@ -44,6 +45,7 @@ class MarketDataTestCase(unittest.TestCase):
         self.service_db_path = self.project_root / "data" / "app" / "ranking_service.db"
         init_db(self.service_db_path)
         ensure_default_universes(self.service_db_path, self.project_root)
+        ensure_default_strategies(self.service_db_path)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -115,3 +117,83 @@ class MarketDataTestCase(unittest.TestCase):
         import_daily_csv_file(self.db_path, self.csv_path, symbol="TEST")
         price = simulate_portfolio.get_price(self.project_root, "TEST", dt.date(2026, 5, 6), "open")
         self.assertEqual(10.5, price)
+
+    def test_resolve_strategy_runtime_uses_default_strategy(self) -> None:
+        runtime = simulate_portfolio.resolve_strategy_runtime(
+            db_path=self.service_db_path,
+            run_name="test-run",
+            strategy_key=None,
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+        )
+        self.assertEqual("top10_hold20_default", runtime.strategy_key)
+        self.assertEqual(10, runtime.buy_top_n)
+        self.assertEqual(20, runtime.hold_top_n)
+
+    def test_capped_target_notional_applies_absolute_and_percent_caps(self) -> None:
+        runtime = simulate_portfolio.StrategyRuntimeConfig(
+            strategy_id=None,
+            strategy_key="cap-test",
+            strategy_name="Cap Test",
+            strategy_type="ranking_hold_band",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            signal_timing="t_close",
+            execution_timing="t_plus_1_open",
+            trade_price_basis="open",
+            max_position_notional=7000.0,
+            max_position_pct=2.0,
+            initial_capital=200000.0,
+        )
+        self.assertEqual(4000.0, simulate_portfolio.capped_target_notional(runtime))
+
+    def test_adjusted_execution_price_applies_fee_and_slippage(self) -> None:
+        runtime = simulate_portfolio.StrategyRuntimeConfig(
+            strategy_id=None,
+            strategy_key="cost-test",
+            strategy_name="Cost Test",
+            strategy_type="ranking_hold_band",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            signal_timing="t_close",
+            execution_timing="t_plus_1_open",
+            trade_price_basis="open",
+            fee_bps=5.0,
+            slippage_bps=10.0,
+        )
+        self.assertAlmostEqual(100.15, simulate_portfolio.adjusted_execution_price(100.0, side="buy", strategy=runtime))
+        self.assertAlmostEqual(99.85, simulate_portfolio.adjusted_execution_price(100.0, side="sell", strategy=runtime))
+
+    def test_gap_filter_blocks_large_gap_up(self) -> None:
+        runtime = simulate_portfolio.StrategyRuntimeConfig(
+            strategy_id=None,
+            strategy_key="gap-test",
+            strategy_name="Gap Test",
+            strategy_type="ranking_hold_band",
+            buy_top_n=10,
+            hold_top_n=20,
+            target_notional=10000.0,
+            signal_timing="t_close",
+            execution_timing="t_plus_1_open",
+            trade_price_basis="open",
+            gap_up_limit_pct=3.0,
+        )
+        blocked = simulate_portfolio.blocked_by_gap_filter(
+            self.project_root,
+            "TEST",
+            dt.date(2026, 5, 6),
+            10.5,
+            runtime,
+        )
+        self.assertFalse(blocked)
+        blocked = simulate_portfolio.blocked_by_gap_filter(
+            self.project_root,
+            "TEST",
+            dt.date(2026, 5, 6),
+            11.0,
+            runtime,
+        )
+        self.assertTrue(blocked)
