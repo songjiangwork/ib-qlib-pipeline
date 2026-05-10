@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import case, func, select
 
-from ..dborm.models import ModelRef, PortfolioLot, PortfolioMark, PortfolioRun, Run, Universe
+from ..dborm.models import ModelRef, PortfolioLot, PortfolioMark, PortfolioRun, Run, Strategy, Universe
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -33,8 +34,10 @@ def _portfolio_summary_query():
         select(
             PortfolioRun.id,
             PortfolioRun.universe_id,
+            PortfolioRun.strategy_id,
             PortfolioRun.name,
             PortfolioRun.strategy,
+            PortfolioRun.strategy_config_json,
             PortfolioRun.buy_top_n,
             PortfolioRun.hold_top_n,
             PortfolioRun.target_notional,
@@ -63,12 +66,16 @@ def _portfolio_summary_query():
             func.min(ModelRef.workflow_base).label("workflow_base"),
             func.min(Universe.key).label("universe_key"),
             func.min(Universe.name).label("universe_name"),
+            func.min(Strategy.key).label("strategy_key"),
+            func.min(Strategy.name).label("strategy_name"),
+            func.min(Strategy.strategy_type).label("strategy_type"),
         )
         .select_from(PortfolioRun)
         .outerjoin(PortfolioLot, PortfolioLot.portfolio_run_id == PortfolioRun.id)
         .outerjoin(Run, Run.id == PortfolioLot.entry_run_id)
         .outerjoin(ModelRef, ModelRef.id == Run.model_id)
         .outerjoin(Universe, Universe.id == PortfolioRun.universe_id)
+        .outerjoin(Strategy, Strategy.id == PortfolioRun.strategy_id)
         .group_by(PortfolioRun.id)
     )
 
@@ -86,6 +93,7 @@ def _normalize_summary_row(row: Any) -> dict[str, Any]:
     item.pop("max_model_id", None)
     item.pop("closed_with_return_count", None)
     item.pop("win_lot_count", None)
+    item["strategy_config"] = json.loads(item["strategy_config_json"]) if item.get("strategy_config_json") else None
     return item
 
 
@@ -130,10 +138,12 @@ def create_portfolio_run(
     *,
     db_path: Path,
     name: str,
+    strategy_id: int | None = None,
     strategy: str,
     buy_top_n: int,
     hold_top_n: int,
     target_notional: float,
+    strategy_config: dict[str, Any] | None = None,
     start_signal_date: str,
     end_signal_date: str | None,
     universe_id: int | None = None,
@@ -143,11 +153,13 @@ def create_portfolio_run(
     with _session_for_db(db_path) as session:
         run = PortfolioRun(
             universe_id=universe_id,
+            strategy_id=strategy_id,
             name=name,
             strategy=strategy,
             buy_top_n=buy_top_n,
             hold_top_n=hold_top_n,
             target_notional=target_notional,
+            strategy_config_json=json.dumps(strategy_config) if strategy_config is not None else None,
             start_signal_date=start_signal_date,
             end_signal_date=end_signal_date,
             created_at=created_at,

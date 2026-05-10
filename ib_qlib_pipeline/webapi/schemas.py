@@ -85,3 +85,59 @@ class UniverseUpdate(BaseModel):
     symbols_file: str | None = Field(default=None, min_length=1, max_length=500)
     description: str | None = Field(default=None, max_length=500)
     details: dict[str, Any] | None = None
+
+
+class StrategyCreate(BaseModel):
+    universe_id: int | None = Field(default=None, ge=1)
+    key: str = Field(min_length=1, max_length=160)
+    name: str = Field(min_length=1, max_length=200)
+    strategy_type: str = Field(min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+    entry_rule: str | None = None
+    exit_rule: str | None = None
+    signal_timing: str | None = Field(default=None, max_length=120)
+    execution_timing: str | None = Field(default=None, max_length=120)
+    trade_price_basis: str | None = Field(default=None, max_length=120)
+    buy_top_n: int | None = Field(default=None, ge=1)
+    hold_top_n: int | None = Field(default=None, ge=1)
+    hold_days: int | None = Field(default=None, ge=1)
+    target_notional: float | None = Field(default=None, ge=0)
+    initial_capital: float | None = Field(default=None, ge=0)
+    max_open_positions: int | None = Field(default=None, ge=1)
+    max_position_notional: float | None = Field(default=None, ge=0)
+    max_position_pct: float | None = Field(default=None, ge=0, le=100)
+    fee_bps: float | None = Field(default=None, ge=0)
+    slippage_bps: float | None = Field(default=None, ge=0)
+    gap_up_limit_pct: float | None = None
+    gap_down_limit_pct: float | None = None
+    allow_reentry: bool | None = None
+    details: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+
+
+class StrategyUpdate(BaseModel):
+    universe_id: int | None = Field(default=None, ge=1)
+    key: str | None = Field(default=None, min_length=1, max_length=160)
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    strategy_type: str | None = Field(default=None, min_length=1, max_length=120)
+    description: str | None = Field(default=None, max_length=1000)
+    entry_rule: str | None = None
+    exit_rule: str | None = None
+    signal_timing: str | None = Field(default=None, max_length=120)
+    execution_timing: str | None = Field(default=None, max_length=120)
+    trade_price_basis: str | None = Field(default=None, max_length=120)
+    buy_top_n: int | None = Field(default=None, ge=1)
+    hold_top_n: int | None = Field(default=None, ge=1)
+    hold_days: int | None = Field(default=None, ge=1)
+    target_notional: float | None = Field(default=None, ge=0)
+    initial_capital: float | None = Field(default=None, ge=0)
+    max_open_positions: int | None = Field(default=None, ge=1)
+    max_position_notional: float | None = Field(default=None, ge=0)
+    max_position_pct: float | None = Field(default=None, ge=0, le=100)
+    fee_bps: float | None = Field(default=None, ge=0)
+    slippage_bps: float | None = Field(default=None, ge=0)
+    gap_up_limit_pct: float | None = None
+    gap_down_limit_pct: float | None = None
+    allow_reentry: bool | None = None
+    details: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None

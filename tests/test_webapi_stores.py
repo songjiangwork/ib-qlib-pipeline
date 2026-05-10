@@ -52,11 +52,20 @@ from ib_qlib_pipeline.webapi.schedule_store import (
     list_schedules,
     update_schedule,
 )
-from ib_qlib_pipeline.webapi.schemas import UniverseCreate, UniverseUpdate
+from ib_qlib_pipeline.webapi.schemas import StrategyCreate, StrategyUpdate, UniverseCreate, UniverseUpdate
 from ib_qlib_pipeline.webapi.service import RankingBackendService
 from ib_qlib_pipeline.webapi.settings import Settings
+from ib_qlib_pipeline.webapi.strategy_store import (
+    create_strategy,
+    ensure_default_strategies,
+    get_strategy,
+    get_strategy_by_key,
+    list_strategies,
+    update_strategy,
+)
 from ib_qlib_pipeline.webapi.universe_store import (
     create_universe,
+    ensure_default_universes,
     get_universe,
     get_universe_by_key,
     list_universe_symbols,
@@ -70,8 +79,10 @@ class StoreTestCase(unittest.TestCase):
         self._tmp = tempfile.TemporaryDirectory()
         self.db_path = Path(self._tmp.name) / "test.db"
         init_db(self.db_path)
-        ensure_default_models(self.db_path)
         self.project_root = Path(__file__).resolve().parent.parent
+        ensure_default_universes(self.db_path, self.project_root)
+        ensure_default_strategies(self.db_path)
+        ensure_default_models(self.db_path, self.project_root)
 
     def tearDown(self) -> None:
         self._tmp.cleanup()
@@ -239,6 +250,101 @@ class StoreTestCase(unittest.TestCase):
             "examples/workflow_us_catboost_2020_port_next_open_5d.yaml",
         )
         self.assertEqual("CatBoost_5D", get_model(self.db_path, model_id)["name"])
+
+    def test_strategy_store_default_and_crud(self) -> None:
+        defaults = list_strategies(self.db_path)
+        self.assertEqual(1, len(defaults))
+        self.assertEqual("top10_hold20_default", defaults[0]["key"])
+        self.assertEqual(10, defaults[0]["buy_top_n"])
+        self.assertEqual(20, defaults[0]["hold_top_n"])
+        self.assertEqual(10000.0, defaults[0]["target_notional"])
+        self.assertTrue(defaults[0]["allow_reentry"])
+
+        created = create_strategy(
+            self.db_path,
+            {
+                "key": "top15_hold30_risk_caps",
+                "name": "Top15 Hold30 Risk Caps",
+                "strategy_type": "ranking_hold_band",
+                "description": "Risk-capped variant",
+                "buy_top_n": 15,
+                "hold_top_n": 30,
+                "target_notional": 8000.0,
+                "initial_capital": 250000.0,
+                "max_position_notional": 12000.0,
+                "max_position_pct": 4.5,
+                "fee_bps": 5.0,
+                "slippage_bps": 8.0,
+                "gap_up_limit_pct": 6.0,
+                "gap_down_limit_pct": -4.0,
+                "allow_reentry": None,
+                "config": {"cash_buffer_pct": 2.0},
+                "details": {"note": "optional fields allowed"},
+            },
+        )
+        self.assertIsNone(created["universe_id"])
+        self.assertEqual(4.5, created["max_position_pct"])
+        self.assertIsNone(created["allow_reentry"])
+        self.assertEqual(2.0, created["config"]["cash_buffer_pct"])
+
+        updated = update_strategy(
+            self.db_path,
+            int(created["id"]),
+            {
+                "description": "Updated",
+                "max_position_pct": 5.0,
+                "max_position_notional": None,
+                "allow_reentry": False,
+                "config": {"cash_buffer_pct": 1.0, "volatility_cap": 0.25},
+            },
+        )
+        fetched = get_strategy(self.db_path, int(created["id"]))
+        self.assertEqual("Updated", updated["description"])
+        self.assertIsNone(fetched["max_position_notional"])
+        self.assertFalse(fetched["allow_reentry"])
+        self.assertEqual(0.25, fetched["config"]["volatility_cap"])
+        self.assertEqual("Top15 Hold30 Risk Caps", get_strategy_by_key(self.db_path, "top15_hold30_risk_caps")["name"])
+
+    def test_strategy_api_list_create_update(self) -> None:
+        app = self._make_app()
+        route_map = {
+            (route.path, tuple(sorted(getattr(route, "methods", [])))): route.endpoint
+            for route in app.routes
+            if hasattr(route, "endpoint")
+        }
+        list_endpoint = route_map[("/api/strategies", ("GET",))]
+        get_endpoint = route_map[("/api/strategies/{strategy_id}", ("GET",))]
+        create_endpoint = route_map[("/api/strategies", ("POST",))]
+        update_endpoint = route_map[("/api/strategies/{strategy_id}", ("PATCH",))]
+
+        listed = list_endpoint()
+        self.assertEqual(1, len(listed))
+
+        created = create_endpoint(
+            StrategyCreate(
+                key="api_strategy",
+                name="API Strategy",
+                strategy_type="ranking_hold_band",
+                buy_top_n=12,
+                hold_top_n=24,
+                max_position_pct=3.5,
+                details={"source": "test"},
+            )
+        )
+        fetched = get_endpoint(int(created["id"]))
+        self.assertEqual("api_strategy", fetched["key"])
+        self.assertEqual(3.5, fetched["max_position_pct"])
+
+        updated = update_endpoint(
+            int(created["id"]),
+            StrategyUpdate(
+                description="updated via api",
+                max_position_notional=15000.0,
+                config={"cash_buffer_pct": 1.5},
+            ),
+        )
+        self.assertEqual(15000.0, updated["max_position_notional"])
+        self.assertEqual(1.5, updated["config"]["cash_buffer_pct"])
 
     def test_run_store_insert_completed_run(self) -> None:
         run_id = self._insert_completed_run()
@@ -629,10 +735,13 @@ class StoreTestCase(unittest.TestCase):
 
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
+        strategy = get_strategy_by_key(self.db_path, "top10_hold20_default")
         portfolio_run_id = create_portfolio_run(
             db_path=self.db_path,
             name="test-run",
+            strategy_id=int(strategy["id"]),
             strategy="top10-hold20",
+            strategy_config={"strategy_key": strategy["key"], "buy_top_n": 10, "hold_top_n": 20},
             buy_top_n=10,
             hold_top_n=20,
             target_notional=10000.0,
@@ -699,6 +808,9 @@ class StoreTestCase(unittest.TestCase):
 
         self.assertEqual(0, sum(len(v) for v in load_open_lots(self.db_path, portfolio_run_id).values()))
         self.assertEqual("LightGBM_Default", portfolio_run["model_name"])
+        self.assertEqual(strategy["id"], portfolio_run["strategy_id"])
+        self.assertEqual("top10_hold20_default", portfolio_run["strategy_key"])
+        self.assertEqual(10, portfolio_run["strategy_config"]["buy_top_n"])
         self.assertEqual(1, portfolio_run["closed_lot_count"])
         self.assertEqual(0, portfolio_run["open_lot_count"])
         self.assertAlmostEqual(5.0, portfolio_run["avg_return_pct"])
@@ -828,10 +940,13 @@ class StoreTestCase(unittest.TestCase):
     def test_service_operations_summary_ready_flags(self) -> None:
         service = self._make_service()
         run_id = self._insert_completed_run(signal_date="2026-05-06", model_id=1)
+        strategy = get_strategy_by_key(self.db_path, "top10_hold20_default")
         portfolio_run_id = create_portfolio_run(
             db_path=self.db_path,
             name="lgb-run",
+            strategy_id=int(strategy["id"]),
             strategy="top10-hold20",
+            strategy_config={"strategy_key": strategy["key"]},
             buy_top_n=10,
             hold_top_n=20,
             target_notional=10000.0,
@@ -869,10 +984,13 @@ class StoreTestCase(unittest.TestCase):
     def test_service_latest_model_state_helpers(self) -> None:
         service = self._make_service()
         run_id = self._insert_completed_run(signal_date="2026-05-06", model_id=1)
+        strategy = get_strategy_by_key(self.db_path, "top10_hold20_default")
         create_portfolio_run(
             db_path=self.db_path,
             name="lgb-run-latest",
+            strategy_id=int(strategy["id"]),
             strategy="top10-hold20",
+            strategy_config={"strategy_key": strategy["key"]},
             buy_top_n=10,
             hold_top_n=20,
             target_notional=10000.0,
@@ -883,7 +1001,9 @@ class StoreTestCase(unittest.TestCase):
         portfolio_run_id = create_portfolio_run(
             db_path=self.db_path,
             name="lgb-run-newest",
+            strategy_id=int(strategy["id"]),
             strategy="top10-hold20",
+            strategy_config={"strategy_key": strategy["key"]},
             buy_top_n=10,
             hold_top_n=20,
             target_notional=10000.0,

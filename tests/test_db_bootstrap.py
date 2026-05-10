@@ -27,6 +27,7 @@ class DbBootstrapTestCase(unittest.TestCase):
         self.assertIn("universes", tables)
         self.assertIn("universe_symbols", tables)
         self.assertIn("models", tables)
+        self.assertIn("strategies", tables)
         self.assertIn("runs", tables)
         self.assertIn("portfolio_runs", tables)
         self.assertIn("jobs", tables)
@@ -35,6 +36,13 @@ class DbBootstrapTestCase(unittest.TestCase):
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         self.assertIn("model_id", run_columns)
         self.assertIn("universe_id", run_columns)
+        strategy_columns = {column["name"] for column in inspector.get_columns("strategies")}
+        self.assertIn("max_position_notional", strategy_columns)
+        self.assertIn("max_position_pct", strategy_columns)
+        self.assertIn("gap_up_limit_pct", strategy_columns)
+        portfolio_run_columns = {column["name"] for column in inspector.get_columns("portfolio_runs")}
+        self.assertIn("strategy_id", portfolio_run_columns)
+        self.assertIn("strategy_config_json", portfolio_run_columns)
 
         schedule_columns = {column["name"] for column in inspector.get_columns("schedules")}
         self.assertIn("schedule_type", schedule_columns)

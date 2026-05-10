@@ -43,6 +43,7 @@ class Universe(Base):
     symbols: Mapped[list["UniverseSymbol"]] = relationship(back_populates="universe", cascade="all, delete-orphan")
     runs: Mapped[list["Run"]] = relationship(back_populates="universe")
     portfolio_runs: Mapped[list["PortfolioRun"]] = relationship(back_populates="universe")
+    strategies: Mapped[list["Strategy"]] = relationship(back_populates="universe")
 
 
 class UniverseSymbol(Base):
@@ -147,23 +148,63 @@ class Recommendation(Base):
     run: Mapped[Run] = relationship(back_populates="recommendations")
 
 
+class Strategy(Base):
+    __tablename__ = "strategies"
+    __table_args__ = (Index("idx_strategies_universe_id", "universe_id", "key"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    universe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("universes.id", ondelete="SET NULL"), nullable=True)
+    key: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    strategy_type: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    entry_rule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exit_rule: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    signal_timing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    execution_timing: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trade_price_basis: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    buy_top_n: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hold_top_n: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    hold_days: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    target_notional: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    initial_capital: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_open_positions: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    max_position_notional: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    max_position_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    fee_bps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    slippage_bps: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gap_up_limit_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    gap_down_limit_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    allow_reentry: Mapped[Optional[bool]] = mapped_column(nullable=True)
+    details_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    universe: Mapped[Optional[Universe]] = relationship(back_populates="strategies")
+    portfolio_runs: Mapped[list["PortfolioRun"]] = relationship(back_populates="strategy_ref")
+
+
 class PortfolioRun(Base):
     __tablename__ = "portfolio_runs"
     __table_args__ = (Index("idx_portfolio_runs_created_at", "created_at"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     universe_id: Mapped[Optional[int]] = mapped_column(ForeignKey("universes.id", ondelete="SET NULL"), nullable=True)
+    strategy_id: Mapped[Optional[int]] = mapped_column(ForeignKey("strategies.id", ondelete="SET NULL"), nullable=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     strategy: Mapped[str] = mapped_column(Text, nullable=False)
     buy_top_n: Mapped[int] = mapped_column(Integer, nullable=False)
     hold_top_n: Mapped[int] = mapped_column(Integer, nullable=False)
     target_notional: Mapped[float] = mapped_column(Float, nullable=False)
+    strategy_config_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     start_signal_date: Mapped[str] = mapped_column(Text, nullable=False)
     end_signal_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[str] = mapped_column(Text, nullable=False)
     notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     universe: Mapped[Optional[Universe]] = relationship(back_populates="portfolio_runs")
+    strategy_ref: Mapped[Optional[Strategy]] = relationship(back_populates="portfolio_runs")
     lots: Mapped[list["PortfolioLot"]] = relationship(back_populates="portfolio_run", cascade="all, delete-orphan")
 
 

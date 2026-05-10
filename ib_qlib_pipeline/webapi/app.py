@@ -23,6 +23,8 @@ from .schemas import (
     RankingBackfillJobRequest,
     ScheduleCreate,
     ScheduleUpdate,
+    StrategyCreate,
+    StrategyUpdate,
     UniverseCreate,
     UniverseUpdate,
 )
@@ -78,6 +80,28 @@ def create_app() -> FastAPI:
     @app.get("/api/universes")
     def get_universes() -> list[dict[str, Any]]:
         return get_service().list_universes()
+
+    @app.get("/api/strategies")
+    def get_strategies() -> list[dict[str, Any]]:
+        return get_service().list_strategies()
+
+    @app.get("/api/strategies/{strategy_id}")
+    def get_strategy(strategy_id: int) -> dict[str, Any]:
+        try:
+            return get_service().get_strategy(strategy_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/strategies")
+    def create_strategy(payload: StrategyCreate) -> dict[str, Any]:
+        return get_service().create_strategy(payload.model_dump())
+
+    @app.patch("/api/strategies/{strategy_id}")
+    def update_strategy(strategy_id: int, payload: StrategyUpdate) -> dict[str, Any]:
+        try:
+            return get_service().update_strategy(strategy_id, payload.model_dump(exclude_none=True))
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     @app.get("/api/universes/{universe_id}")
     def get_universe(universe_id: int) -> dict[str, Any]:

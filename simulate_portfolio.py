@@ -25,6 +25,7 @@ from ib_qlib_pipeline.webapi.portfolio_store import (
 )
 from ib_qlib_pipeline.webapi.run_store import load_signal_map
 from ib_qlib_pipeline.webapi.settings import Settings
+from ib_qlib_pipeline.webapi.strategy_store import ensure_default_strategies, get_strategy_by_key, strategy_snapshot_for_portfolio
 from ib_qlib_pipeline.ranking.ranking_loader import read_available_trading_days
 
 
@@ -97,6 +98,7 @@ def simulate() -> None:
     args = parse_args()
     settings = Settings.load()
     init_db(settings.db_path)
+    ensure_default_strategies(settings.db_path)
 
     project_root = settings.project_root
     trading_days = read_available_trading_days(project_root)
@@ -163,10 +165,32 @@ def simulate() -> None:
             args.name
             or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
         )
+        default_strategy = None
+        strategy_id = None
+        strategy_config = {
+            "strategy_key": "ad_hoc",
+            "strategy_name": run_name,
+            "strategy_type": "ranking_hold_band",
+            "buy_top_n": args.buy_top_n,
+            "hold_top_n": args.hold_top_n,
+            "target_notional": args.target_notional,
+            "signal_timing": "t_close",
+            "execution_timing": "t_plus_1_open",
+            "trade_price_basis": "open",
+        }
+        if args.buy_top_n == 10 and args.hold_top_n == 20 and abs(float(args.target_notional) - 10000.0) < 1e-9:
+            default_strategy = get_strategy_by_key(settings.db_path, "top10_hold20_default")
+            if default_strategy is not None:
+                strategy_id = int(default_strategy["id"])
+                snapshot = strategy_snapshot_for_portfolio(settings.db_path, strategy_id)
+                if snapshot is not None:
+                    strategy_config = snapshot
         portfolio_run_id = create_portfolio_run(
             db_path=settings.db_path,
             name=run_name,
+            strategy_id=strategy_id,
             strategy="t_minus_1_rank__t_open_execute",
+            strategy_config=strategy_config,
             buy_top_n=args.buy_top_n,
             hold_top_n=args.hold_top_n,
             target_notional=args.target_notional,

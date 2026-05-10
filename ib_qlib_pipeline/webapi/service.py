@@ -52,6 +52,14 @@ from .schedule_store import (
     update_schedule as update_schedule_record,
 )
 from .settings import Settings
+from .strategy_store import (
+    backfill_portfolio_run_strategies,
+    create_strategy as create_strategy_record,
+    ensure_default_strategies,
+    get_strategy as get_strategy_record,
+    list_strategies as list_strategy_records,
+    update_strategy as update_strategy_record,
+)
 from .universe_store import (
     backfill_model_universes,
     backfill_portfolio_run_universes,
@@ -81,11 +89,13 @@ class RankingBackendService:
         self._scheduler = BackgroundScheduler(timezone=settings.timezone)
         init_db(settings.db_path)
         ensure_default_universes(settings.db_path, settings.project_root)
+        ensure_default_strategies(settings.db_path)
         ensure_default_models(settings.db_path, settings.project_root)
         backfill_model_universes(settings.db_path)
         self._backfill_legacy_run_models()
         backfill_run_universes(settings.db_path)
         backfill_portfolio_run_universes(settings.db_path)
+        backfill_portfolio_run_strategies(settings.db_path)
 
     def start(self) -> None:
         self._scheduler.start()
@@ -100,6 +110,24 @@ class RankingBackendService:
 
     def list_universes(self) -> list[dict[str, Any]]:
         return list_universe_records(self.settings.db_path)
+
+    def list_strategies(self) -> list[dict[str, Any]]:
+        return list_strategy_records(self.settings.db_path)
+
+    def get_strategy(self, strategy_id: int) -> dict[str, Any]:
+        row = get_strategy_record(self.settings.db_path, strategy_id)
+        if row is None:
+            raise NotFoundError(f"Strategy {strategy_id} not found")
+        return row
+
+    def create_strategy(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return create_strategy_record(self.settings.db_path, payload)
+
+    def update_strategy(self, strategy_id: int, payload: dict[str, Any]) -> dict[str, Any]:
+        row = update_strategy_record(self.settings.db_path, strategy_id, payload)
+        if row is None:
+            raise NotFoundError(f"Strategy {strategy_id} not found")
+        return row
 
     def get_universe(self, universe_id: int) -> dict[str, Any]:
         row = get_universe_record(self.settings.db_path, universe_id)
