@@ -77,6 +77,14 @@ export class DailyRankingsPage {
     await this.state.selectPortfolioRun(portfolioRunId);
   }
 
+  protected async onUniverseChange(value: string): Promise<void> {
+    const universeId = Number(value);
+    if (!Number.isFinite(universeId) || universeId <= 0) {
+      return;
+    }
+    await this.state.selectUniverse(universeId);
+  }
+
   protected async onRankingRunChange(value: string): Promise<void> {
     const runId = Number(value);
     if (!Number.isFinite(runId) || runId <= 0) {

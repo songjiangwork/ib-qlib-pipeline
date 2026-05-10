@@ -2,9 +2,18 @@
   <section class="context-bar panel">
     <div class="context-grid">
       <label class="field">
+        <span>{{ i18n.t('universe') }}</span>
+        <select [value]="state.selectedUniverseId() || ''" (change)="onUniverseChange($any($event.target).value)">
+          @for (universe of state.universes(); track universe.id) {
+            <option [value]="universe.id">{{ universe.name }}</option>
+          }
+        </select>
+      </label>
+
+      <label class="field">
         <span>{{ i18n.t('portfolioRun') }}</span>
         <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
-          @for (run of state.portfolioRuns(); track run.id) {
+          @for (run of state.filteredPortfolioRuns(); track run.id) {
             <option [value]="run.id">#{{ run.id }} {{ run.name }}</option>
           }
         </select>

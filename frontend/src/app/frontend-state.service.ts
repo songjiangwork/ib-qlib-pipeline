@@ -48,6 +48,18 @@ export interface ModelRef {
   name: string;
   model_class: string;
   workflow_base?: string | null;
+  universe_id?: number | null;
+  universe_key?: string | null;
+  universe_name?: string | null;
+}
+
+export interface UniverseRef {
+  id: number;
+  key: string;
+  name: string;
+  symbols_file: string;
+  symbol_count: number;
+  description?: string | null;
 }
 
 export interface JobSummary {
@@ -168,6 +180,9 @@ export interface PortfolioRunSummary {
   id: number;
   name: string;
   strategy: string;
+  universe_id?: number | null;
+  universe_key?: string | null;
+  universe_name?: string | null;
   model_id?: number | null;
   model_key?: string | null;
   model_name?: string | null;
@@ -246,6 +261,8 @@ export class FrontendStateService {
   readonly rankingDateFilter = signal('');
   readonly symbolFilter = signal('');
   readonly backendConfig = signal<BackendConfig | null>(null);
+  readonly universes = signal<UniverseRef[]>([]);
+  readonly selectedUniverseId = signal<number | null>(null);
   readonly models = signal<ModelRef[]>([]);
   readonly recentRuns = signal<RunSummary[]>([]);
   readonly rankingDates = signal<RankingDateItem[]>([]);
@@ -278,6 +295,14 @@ export class FrontendStateService {
     this.portfolioRuns().find((run) => run.id === this.selectedPortfolioRunId()) ?? null,
   );
 
+  readonly filteredPortfolioRuns = computed(() => {
+    const universeId = this.selectedUniverseId();
+    if (universeId === null) {
+      return this.portfolioRuns();
+    }
+    return this.portfolioRuns().filter((run) => run.universe_id === universeId);
+  });
+
   readonly symbolsInRun = computed(() => {
     const symbols = Array.from(new Set(this.portfolioLots().map((lot) => lot.symbol))).sort();
     const filter = this.symbolFilter().trim().toUpperCase();
@@ -291,17 +316,22 @@ export class FrontendStateService {
     this.isLoading.set(true);
     this.loadError.set(null);
     try {
-      const [config, runs, portfolioRuns, models] = await Promise.all([
+      const [config, runs, portfolioRuns, models, universes] = await Promise.all([
         firstValueFrom(this.http.get<BackendConfig>('/api/config')),
         firstValueFrom(this.http.get<RunSummary[]>('/api/runs?limit=500')),
         firstValueFrom(this.http.get<PortfolioRunSummary[]>('/api/portfolio-runs')),
         firstValueFrom(this.http.get<ModelRef[]>('/api/models')),
+        firstValueFrom(this.http.get<UniverseRef[]>('/api/universes')),
       ]);
 
       this.backendConfig.set(config ?? null);
       this.recentRuns.set(runs ?? []);
       this.portfolioRuns.set(portfolioRuns ?? []);
       this.models.set(models ?? []);
+      this.universes.set(universes ?? []);
+      if ((universes ?? []).length > 0 && this.selectedUniverseId() === null) {
+        this.selectedUniverseId.set(universes![0].id);
+      }
       await this.loadRankingDates(true);
 
       if (!this.selectedRankingRunId() && runs && runs.length > 0) {
@@ -576,6 +606,10 @@ export class FrontendStateService {
       const lots = await firstValueFrom(
         this.http.get<PortfolioLot[]>(`/api/portfolio-runs/${portfolioRunId}/lots`),
       );
+      const selectedRun = this.portfolioRuns().find((run) => run.id === portfolioRunId) ?? null;
+      if (selectedRun?.universe_id) {
+        this.selectedUniverseId.set(selectedRun.universe_id);
+      }
       this.portfolioLots.set(lots ?? []);
       const symbols = new Set((lots ?? []).map((lot) => lot.symbol));
       this.compareSymbols.set(this.compareSymbols().filter((symbol) => symbols.has(symbol)));
@@ -600,6 +634,26 @@ export class FrontendStateService {
       this.compareSymbols.set([]);
       this.detailError.set(this.i18n.t('failedPortfolioLots'));
     }
+  }
+
+  async selectUniverse(universeId: number): Promise<void> {
+    this.selectedUniverseId.set(universeId);
+    const filtered = this.portfolioRuns().filter((run) => run.universe_id === universeId);
+    const currentRunId = this.selectedPortfolioRunId();
+    if (currentRunId !== null && filtered.some((run) => run.id === currentRunId)) {
+      return;
+    }
+    const nextRun = filtered[0] ?? null;
+    if (nextRun) {
+      await this.selectPortfolioRun(nextRun.id);
+      return;
+    }
+    this.selectedPortfolioRunId.set(null);
+    this.portfolioLots.set([]);
+    this.selectedRankingRunId.set(null);
+    this.selectedRunData.set(null);
+    this.selectedSymbolLifecycle.set(null);
+    this.selectedSymbolPriceBars.set([]);
   }
 
   async ensureAllRankingDatesLoaded(): Promise<void> {
