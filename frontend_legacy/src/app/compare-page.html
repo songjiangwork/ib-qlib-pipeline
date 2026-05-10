@@ -1,0 +1,182 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('compareStocks') }}</p>
+      <h2>{{ i18n.t('compareStocks') }}</h2>
+      <p class="muted">{{ i18n.t('compareSubtitle') }}</p>
+    </div>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('selectedSymbols') }}</span>
+        <strong>{{ state.compareSymbols().length }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('portfolioRun') }}</span>
+        <strong>
+          {{
+            state.selectedPortfolioRun()
+              ? '#' + state.selectedPortfolioRun()!.id + ' ' + state.selectedPortfolioRun()!.name
+              : 'N/A'
+          }}
+        </strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('model') }}</span>
+        <strong>
+          @if (state.selectedPortfolioRun()?.model_name) {
+            <span class="model-badge">{{ state.selectedPortfolioRun()!.model_key || 'n/a' }}</span>
+            {{ state.selectedPortfolioRun()!.model_name }}
+          } @else {
+            N/A
+          }
+        </strong>
+      </div>
+    </div>
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  <section class="panel">
+    <div class="panel-head">
+      <h3>{{ i18n.t('portfolioRunLeaderboard') }}</h3>
+      <span>{{ portfolioRunRows().length }}</span>
+    </div>
+    <p class="muted">{{ i18n.t('portfolioRunLeaderboardSubtitle') }}</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('id')">ID{{ runSortMarker('id') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('name')">{{ i18n.t('portfolioRun') }}{{ runSortMarker('name') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('modelName')">{{ i18n.t('model') }}{{ runSortMarker('modelName') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('workflowBase')">{{ i18n.t('workflow') }}{{ runSortMarker('workflowBase') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('lotCount')">{{ i18n.t('lots') }}{{ runSortMarker('lotCount') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('closedLots')">{{ i18n.t('closedLots') }}{{ runSortMarker('closedLots') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('openLots')">{{ i18n.t('openLots') }}{{ runSortMarker('openLots') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgHoldDays')">{{ i18n.t('avgHoldDays') }}{{ runSortMarker('avgHoldDays') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('winRatePct')">{{ i18n.t('winRate') }}{{ runSortMarker('winRatePct') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgReturnPct')">{{ i18n.t('avgReturnPct') }}{{ runSortMarker('avgReturnPct') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleRunSort('totalRealizedPnl')">{{ i18n.t('realizedPnl') }}{{ runSortMarker('totalRealizedPnl') }}</button></th>
+            <th>{{ i18n.t('action') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (run of portfolioRunRows(); track run.id) {
+            <tr [class.selected-row]="run.isSelected">
+              <td>#{{ run.id }}</td>
+              <td>{{ run.name }}</td>
+              <td>
+                <span class="model-badge">{{ run.modelKey }}</span>
+                {{ run.modelName }}
+              </td>
+              <td>{{ run.workflowBase }}</td>
+              <td>{{ run.lotCount }}</td>
+              <td>{{ run.closedLots }}</td>
+              <td>{{ run.openLots }}</td>
+              <td>{{ run.avgHoldDays === null ? 'N/A' : (run.avgHoldDays | number:'1.1-1') }}</td>
+              <td>{{ run.winRatePct === null ? 'N/A' : (run.winRatePct | number:'1.1-1') + '%' }}</td>
+              <td [class]="pnlClass(run.avgReturnPct)">
+                {{ run.avgReturnPct === null ? 'N/A' : (run.avgReturnPct | number:'1.2-2') + '%' }}
+              </td>
+              <td [class]="pnlClass(run.totalRealizedPnl)">{{ run.totalRealizedPnl === null ? 'N/A' : (run.totalRealizedPnl | number:'1.2-2') }}</td>
+              <td>
+                <button type="button" class="action-button" (click)="selectPortfolioRun(run.id)">
+                  {{ run.isSelected ? i18n.t('selected') : i18n.t('choose') }}
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('selectedSymbols') }}</h3>
+        <button type="button" class="action-button" (click)="clearAll()">
+          {{ i18n.t('clearAll') }}
+        </button>
+      </div>
+      <p class="muted">
+        {{ i18n.t('model') }}:
+        @if (state.selectedPortfolioRun()?.model_name) {
+          <span class="model-badge">{{ state.selectedPortfolioRun()!.model_key || 'n/a' }}</span>
+          {{ state.selectedPortfolioRun()!.model_name }}
+        } @else {
+          N/A
+        }
+      </p>
+      <p class="muted">{{ i18n.t('compareHint') }}</p>
+      <div class="chip-list">
+        @for (symbol of state.symbolsInRun(); track symbol) {
+          <button
+            type="button"
+            class="chip"
+            [class.active]="state.isCompareSelected(symbol)"
+            (click)="toggleSymbol(symbol)"
+          >
+            {{ symbol }}
+          </button>
+        }
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('compareDetail') }}</h3>
+        <div class="panel-actions">
+          <span>{{ compareRows().length }}</span>
+          <button type="button" class="action-button" (click)="clearAll()">
+            {{ i18n.t('clearAll') }}
+          </button>
+        </div>
+      </div>
+      @if (compareRows().length < 2) {
+        <div class="empty">{{ i18n.t('compareEmpty') }}</div>
+      } @else {
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('symbol')">{{ i18n.t('symbol') }}{{ symbolSortMarker('symbol') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('timesEntered')">{{ i18n.t('timesEntered') }}{{ symbolSortMarker('timesEntered') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('closedLots')">{{ i18n.t('closedLots') }}{{ symbolSortMarker('closedLots') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('openLots')">{{ i18n.t('openLots') }}{{ symbolSortMarker('openLots') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('avgHoldDays')">{{ i18n.t('avgHoldDays') }}{{ symbolSortMarker('avgHoldDays') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('winRatePct')">{{ i18n.t('winRate') }}{{ symbolSortMarker('winRatePct') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('avgReturnPct')">{{ i18n.t('avgReturnPct') }}{{ symbolSortMarker('avgReturnPct') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('totalRealizedPnl')">{{ i18n.t('realizedPnl') }}{{ symbolSortMarker('totalRealizedPnl') }}</button></th>
+                <th><button type="button" class="sort-button" (click)="toggleSymbolSort('latestStatus')">{{ i18n.t('latestStatus') }}{{ symbolSortMarker('latestStatus') }}</button></th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (row of compareRows(); track row.symbol) {
+                <tr>
+                  <td>
+                    <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
+                      {{ row.symbol }}
+                    </button>
+                  </td>
+                  <td>{{ row.timesEntered }}</td>
+                  <td>{{ row.closedLots }}</td>
+                  <td>{{ row.openLots }}</td>
+                  <td>{{ row.avgHoldDays === null ? 'N/A' : (row.avgHoldDays | number:'1.1-1') }}</td>
+                  <td>{{ row.winRatePct === null ? 'N/A' : (row.winRatePct | number:'1.1-1') + '%' }}</td>
+                  <td [class]="pnlClass(row.avgReturnPct)">
+                    {{ row.avgReturnPct === null ? 'N/A' : (row.avgReturnPct | number:'1.2-2') + '%' }}
+                  </td>
+                  <td [class]="pnlClass(row.totalRealizedPnl)">{{ row.totalRealizedPnl | number:'1.2-2' }}</td>
+                  <td>{{ statusLabel(row.latestStatus) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      }
+    </section>
+  </div>
+</section>

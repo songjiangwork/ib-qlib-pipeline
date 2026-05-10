@@ -35,7 +35,7 @@ th {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 14px 16px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.58);
   min-width: 180px;
 }
 
@@ -54,11 +54,11 @@ th {
 .model-badge {
   display: inline-block;
   margin-right: 8px;
-  border: 1px solid rgba(76, 141, 255, 0.28);
+  border: 1px solid rgba(12, 122, 90, 0.28);
   border-radius: 999px;
   padding: 2px 8px;
-  background: rgba(76, 141, 255, 0.14);
-  color: #88b4ff;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -76,7 +76,7 @@ th {
 .notice {
   border: 1px solid var(--line);
   border-radius: 24px;
-  background: linear-gradient(180deg, rgba(16, 30, 49, 0.95), rgba(10, 19, 32, 0.94));
+  background: rgba(255, 252, 247, 0.84);
   box-shadow: var(--shadow);
   padding: 18px;
 }
@@ -85,7 +85,7 @@ th {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.56);
 }
 
 table {
@@ -101,10 +101,6 @@ td {
   white-space: nowrap;
 }
 
-td {
-  color: var(--text);
-}
-
 .summary-cards {
   display: grid;
   gap: 12px;
@@ -114,7 +110,7 @@ td {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.58);
 }
 
 .summary-cards strong {
@@ -152,18 +148,18 @@ td {
 }
 
 .flag.buy {
-  background: rgba(55, 211, 154, 0.14);
-  color: var(--success);
+  background: rgba(12, 122, 90, 0.12);
+  color: var(--accent);
 }
 
 .flag.hold {
-  background: rgba(76, 141, 255, 0.14);
-  color: #9dc2ff;
+  background: rgba(44, 85, 170, 0.12);
+  color: #2c55aa;
 }
 
 .flag.hold-soft {
-  background: rgba(255, 255, 255, 0.06);
-  color: #c6d7f2;
+  background: rgba(199, 170, 123, 0.18);
+  color: #7f5d12;
 }
 
 .flag.flat {

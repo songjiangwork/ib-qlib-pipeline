@@ -1,0 +1,121 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('byDay') }}</p>
+      <h2>{{ i18n.t('dailyRankings') }}</h2>
+      <p class="muted">
+        {{ i18n.t('dailyRankingsSubtitle') }}
+      </p>
+    </div>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('signal') }}</span>
+        <strong>{{ state.selectedRunData()?.run?.signal_date || 'N/A' }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('model') }}</span>
+        <strong>
+          @if (state.selectedRunData()?.run?.model_name) {
+            <span class="model-badge">{{ state.selectedRunData()?.run?.model_key || 'n/a' }}</span>
+            {{ state.selectedRunData()?.run?.model_name }}
+          } @else {
+            N/A
+          }
+        </strong>
+      </div>
+    </div>
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('top20Snapshot') }}</h3>
+        <span>{{ top20().length }} rows</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('rank')">Rank{{ sortMarker('rank') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('symbol')">{{ i18n.t('symbol') }}{{ sortMarker('symbol') }}</button></th>
+                  <th>{{ i18n.t('action') }}</th>
+                  <th>{{ i18n.t('held') }}</th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('score')">{{ i18n.t('score') }}{{ sortMarker('score') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('percentile')">{{ i18n.t('percentile') }}{{ sortMarker('percentile') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('entry_price')">{{ i18n.t('referenceClose') }}{{ sortMarker('entry_price') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleSort('oneDay')">1D{{ sortMarker('oneDay') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleSort('latest')">Latest{{ sortMarker('latest') }}</button></th>
+            </tr>
+          </thead>
+          <tbody>
+                @for (row of top20(); track row.rank) {
+                  <tr>
+                    <td>{{ row.rank }}</td>
+                    <td>
+                      <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
+                        {{ row.symbol }}
+                      </button>
+                    </td>
+                    <td>
+                      @if (state.isBoughtOnSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
+                        <span class="flag buy">{{ i18n.t('buyNextOpen') }}</span>
+                      } @else {
+                        <span class="flag hold-soft">{{ i18n.t('carry') }}</span>
+                      }
+                    </td>
+                    <td>
+                      @if (state.isHeldAfterSignal(row.symbol, state.selectedRunData()?.run?.signal_date)) {
+                        <span class="flag hold">{{ i18n.t('heldYes') }}</span>
+                      } @else {
+                        <span class="flag flat">{{ i18n.t('flat') }}</span>
+                      }
+                    </td>
+                    <td>{{ row.score | number:'1.4-4' }}</td>
+                    <td>{{ row.percentile === null ? 'N/A' : (row.percentile | number:'1.2-2') + '%' }}</td>
+                    <td>{{ row.entry_price === null ? 'N/A' : (row.entry_price | number:'1.2-2') }}</td>
+                <td>{{ row.performance?.['1d'] ? (row.performance?.['1d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}</td>
+                <td>{{ row.performance?.['latest'] ? (row.performance?.['latest']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel summary-panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('runSummary') }}</h3>
+      </div>
+      @if (state.selectedRunData()) {
+        <div class="summary-cards">
+          @for (label of ['1d', '5d', '10d', '21d', 'latest']; track label) {
+            <article>
+              <span>{{ label }}</span>
+              <strong>
+                {{
+                  state.selectedRunData()!.summary[label]?.avg_return_pct === null
+                    ? 'N/A'
+                    : (state.selectedRunData()!.summary[label]?.avg_return_pct | number:'1.2-2') + '%'
+                }}
+              </strong>
+              <small>
+                {{ i18n.t('winRate') }}:
+                {{
+                  state.selectedRunData()!.summary[label]?.win_rate_pct === null
+                    ? 'N/A'
+                    : (state.selectedRunData()!.summary[label]?.win_rate_pct | number:'1.0-1') + '%'
+                }}
+              </small>
+            </article>
+          }
+        </div>
+      } @else {
+        <div class="empty">{{ i18n.t('selectRankingDate') }}</div>
+      }
+    </section>
+  </div>
+</section>

@@ -1,0 +1,96 @@
+<section class="dashboard">
+  <header class="hero">
+    <div>
+      <p class="eyebrow">{{ i18n.t('dashboard') }}</p>
+      <h2>{{ i18n.t('dashboardHeadline') }}</h2>
+      <p class="subtitle">{{ i18n.t('dashboardSubtitle') }}</p>
+    </div>
+    <div class="hero-actions">
+      <a routerLink="/operations" class="hero-link">{{ i18n.t('operations') }}</a>
+      <a routerLink="/rankings" class="hero-link secondary">{{ i18n.t('dailyRankings') }}</a>
+    </div>
+  </header>
+
+  <section class="summary-grid">
+    @for (card of summaryCards(); track card.label) {
+      <article class="summary-card">
+        <p>{{ card.label }}</p>
+        <strong>{{ card.value }}</strong>
+        <span>{{ card.detail }}</span>
+      </article>
+    }
+  </section>
+
+  <section class="dashboard-grid">
+    <article class="panel wide">
+      <div class="panel-head">
+        <h3>{{ i18n.t('todayStatus') }}</h3>
+        <span>{{ state.operationsSummary()?.trade_date || '—' }}</span>
+      </div>
+      <div class="status-table">
+        @for (item of modelStatusRows(); track item.model_id) {
+          <div class="status-row">
+            <div>
+              <strong>{{ item.model_name }}</strong>
+              <span>{{ item.workflow_base || '—' }}</span>
+            </div>
+            <div>
+              <strong>{{ item.latest_ranking_signal_date || '—' }}</strong>
+              <span>{{ i18n.t('latestRanking') }}</span>
+            </div>
+            <div>
+              <strong [class.good]="item.ranking_ready_for_trade_date">{{ item.ranking_ready_for_trade_date ? i18n.t('yes') : i18n.t('no') }}</strong>
+              <span>{{ i18n.t('rankingReady') }}</span>
+            </div>
+            <div>
+              <strong>{{ item.portfolio_end_signal_date || '—' }}</strong>
+              <span>{{ i18n.t('portfolioThrough') }}</span>
+            </div>
+            <div>
+              <strong [class.good]="item.portfolio_ready_for_trade_date">{{ item.portfolio_ready_for_trade_date ? i18n.t('yes') : i18n.t('no') }}</strong>
+              <span>{{ i18n.t('portfolioReady') }}</span>
+            </div>
+          </div>
+        }
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('recentJobs') }}</h3>
+        <a routerLink="/operations">{{ i18n.t('workflowOps') }}</a>
+      </div>
+      <div class="mini-table">
+        @for (job of recentJobRows(); track job.id) {
+          <div class="mini-row">
+            <div>
+              <strong>#{{ job.id }} {{ job.title }}</strong>
+              <span>{{ job.job_type }}</span>
+            </div>
+            <span class="status-chip" [class.running]="job.status === 'running' || job.status === 'queued'" [class.failed]="job.status === 'failed'">
+              {{ job.status }}
+            </span>
+          </div>
+        }
+      </div>
+    </article>
+
+    <article class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('portfolioRuns') }}</h3>
+        <a routerLink="/compare">{{ i18n.t('compareStocks') }}</a>
+      </div>
+      <div class="mini-table">
+        @for (run of recentPortfolioRows(); track run.id) {
+          <div class="mini-row">
+            <div>
+              <strong>#{{ run.id }} {{ run.name }}</strong>
+              <span>{{ run.start_signal_date }} → {{ run.end_signal_date || 'open' }}</span>
+            </div>
+            <span class="badge">{{ run.model_key || 'n/a' }}</span>
+          </div>
+        }
+      </div>
+    </article>
+  </section>
+</section>

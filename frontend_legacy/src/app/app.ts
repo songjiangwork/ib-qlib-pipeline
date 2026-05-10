@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 
 import { FrontendI18nService, Language } from './frontend-i18n.service';
@@ -14,7 +14,6 @@ import { FrontendStateService } from './frontend-state.service';
 export class App {
   protected readonly i18n = inject(FrontendI18nService);
   protected readonly state = inject(FrontendStateService);
-  protected readonly navOpen = signal(false);
   private readonly router = inject(Router);
   private rankingDateFilterTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -23,7 +22,6 @@ export class App {
   }
 
   protected async onPortfolioRunClick(portfolioRunId: number): Promise<void> {
-    this.closeNav();
     const currentUrl = this.router.url;
     const currentSymbol = currentUrl.startsWith('/symbols/')
       ? this.state.selectedSymbolLifecycle()?.symbol ?? null
@@ -43,7 +41,6 @@ export class App {
   }
 
   protected async onRankingRunClick(runId: number): Promise<void> {
-    this.closeNav();
     await this.state.selectRankingRun(runId);
     await this.router.navigate(['/rankings'], {
       queryParams: { runId },
@@ -66,14 +63,6 @@ export class App {
 
   protected setLanguage(language: Language): void {
     this.i18n.setLanguage(language);
-  }
-
-  protected toggleNav(): void {
-    this.navOpen.update((value) => !value);
-  }
-
-  protected closeNav(): void {
-    this.navOpen.set(false);
   }
 
   protected async loadMoreRankingDates(): Promise<void> {

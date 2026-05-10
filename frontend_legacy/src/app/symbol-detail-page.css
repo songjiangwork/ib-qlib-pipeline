@@ -42,7 +42,7 @@ th {
 .notice {
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(16, 30, 49, 0.95), rgba(10, 19, 32, 0.94));
+  background: rgba(255, 252, 247, 0.84);
   box-shadow: var(--shadow);
 }
 
@@ -68,11 +68,11 @@ th {
 .model-badge {
   display: inline-block;
   margin-right: 8px;
-  border: 1px solid rgba(76, 141, 255, 0.28);
+  border: 1px solid rgba(12, 122, 90, 0.28);
   border-radius: 999px;
   padding: 2px 8px;
-  background: rgba(76, 141, 255, 0.14);
-  color: #88b4ff;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -108,7 +108,7 @@ th {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.56);
 }
 
 .chart-meta {
@@ -143,23 +143,22 @@ th {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 8px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.56);
   font: inherit;
   cursor: pointer;
 }
 
 .chart-button.active {
-  border-color: rgba(76, 141, 255, 0.36);
-  background: rgba(76, 141, 255, 0.12);
-  color: #edf4ff;
+  border-color: rgba(12, 122, 90, 0.4);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .chart-meta div {
   border: 1px solid var(--line);
   border-radius: 16px;
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.56);
 }
 
 .chart-meta span {
@@ -180,8 +179,8 @@ th {
   border: 1px solid var(--line);
   border-radius: 18px;
   background:
-    linear-gradient(180deg, rgba(76, 141, 255, 0.12), rgba(76, 141, 255, 0.02)),
-    rgba(255, 255, 255, 0.03);
+    linear-gradient(180deg, rgba(12, 122, 90, 0.08), rgba(12, 122, 90, 0.01)),
+    rgba(255, 255, 255, 0.56);
   padding: 14px;
 }
 
@@ -204,10 +203,6 @@ td {
   white-space: nowrap;
 }
 
-td {
-  color: var(--text);
-}
-
 .panel.empty {
   padding: 24px;
   color: var(--muted);
@@ -220,7 +215,7 @@ td {
 }
 
 .up {
-  color: var(--success);
+  color: var(--accent);
 }
 
 .down {

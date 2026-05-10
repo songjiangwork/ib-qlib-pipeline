@@ -1,0 +1,259 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('bySymbol') }}</p>
+      <h2>{{ i18n.t('symbolDetail') }}</h2>
+      <p class="muted">{{ i18n.t('symbolDetailSubtitle') }}</p>
+    </div>
+    @if (lifecycle()) {
+      <div class="head-summaries">
+        <div class="summary">
+          <span>{{ i18n.t('symbol') }}</span>
+          <strong>{{ lifecycle()!.symbol }}</strong>
+        </div>
+        <div class="summary">
+          <span>{{ i18n.t('portfolioRun') }}</span>
+          <strong>#{{ displayPortfolioRun()?.id }} {{ displayPortfolioRun()?.name }}</strong>
+        </div>
+        <div class="summary">
+          <span>{{ i18n.t('model') }}</span>
+          <strong>
+            @if (displayPortfolioRun()?.model_name) {
+              <span class="model-badge">{{ displayPortfolioRun()?.model_key || 'n/a' }}</span>
+              {{ displayPortfolioRun()?.model_name }}
+            } @else {
+              {{ modelDisplay() }}
+            }
+          </strong>
+        </div>
+      </div>
+    }
+  </div>
+
+  @if (state.detailError()) {
+    <div class="notice error">{{ state.detailError() }}</div>
+  }
+
+  @if (!lifecycle()) {
+    <div class="panel empty">{{ i18n.t('chooseSymbol') }}</div>
+  } @else {
+    <div class="summary-grid">
+      <article class="summary-card">
+        <span>{{ i18n.t('lots') }}</span>
+        <strong>{{ headlineStats().lotCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('closedLots') }}</span>
+        <strong>{{ headlineStats().closedCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('openLots') }}</span>
+        <strong>{{ headlineStats().openCount }}</strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('realizedPnl') }}</span>
+        <strong [class]="pnlClass(headlineStats().realizedPnl)">
+          {{ headlineStats().realizedPnl | number:'1.2-2' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('latestUnrealized') }}</span>
+        <strong [class]="pnlClass(headlineStats().latestUnrealized)">
+          {{ headlineStats().latestUnrealized | number:'1.2-2' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('avgHoldDaysShort') }}</span>
+        <strong>
+          {{ headlineStats().avgHoldDays === null ? 'N/A' : (headlineStats().avgHoldDays | number:'1.1-1') }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('winRateShort') }}</span>
+        <strong>
+          {{ headlineStats().winRatePct === null ? 'N/A' : (headlineStats().winRatePct | number:'1.1-1') + '%' }}
+        </strong>
+      </article>
+      <article class="summary-card">
+        <span>{{ i18n.t('avgReturnShort') }}</span>
+        <strong [class]="pnlClass(headlineStats().avgReturnPct)">
+          {{ headlineStats().avgReturnPct === null ? 'N/A' : (headlineStats().avgReturnPct | number:'1.2-2') + '%' }}
+        </strong>
+      </article>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('priceChart') }}</h3>
+        @if (chartSummary()) {
+          <span>{{ chartSummary()!.firstTime }} -> {{ chartSummary()!.lastTime }}</span>
+        }
+      </div>
+      <div class="chart-toolbar">
+        <div class="toolbar-group">
+          <span>{{ i18n.t('chartInterval') }}</span>
+          <button
+            type="button"
+            class="chart-button active"
+            (click)="setInterval('1d')"
+          >
+            1D
+          </button>
+        </div>
+        <div class="toolbar-group">
+          <span>{{ i18n.t('chartRange') }}</span>
+          <button type="button" class="chart-button" [class.active]="selectedRange() === '1m'" (click)="setRange('1m')">
+            {{ i18n.t('oneMonth') }}
+          </button>
+          <button type="button" class="chart-button" [class.active]="selectedRange() === '3m'" (click)="setRange('3m')">
+            {{ i18n.t('threeMonths') }}
+          </button>
+          <button type="button" class="chart-button" [class.active]="selectedRange() === '6m'" (click)="setRange('6m')">
+            {{ i18n.t('sixMonths') }}
+          </button>
+          <button type="button" class="chart-button" [class.active]="selectedRange() === '1y'" (click)="setRange('1y')">
+            {{ i18n.t('oneYear') }}
+          </button>
+          <button type="button" class="chart-button" [class.active]="selectedRange() === 'all'" (click)="setRange('all')">
+            {{ i18n.t('allRange') }}
+          </button>
+        </div>
+      </div>
+      @if (!chartSummary()) {
+        <div class="empty">{{ i18n.t('noPriceData') }}</div>
+      } @else {
+        <div class="chart-meta">
+          <div>
+            <span>{{ i18n.t('close') }}</span>
+            <strong>{{ chartSummary()!.lastClose | number:'1.2-2' }}</strong>
+          </div>
+          <div>
+            <span>{{ i18n.t('minPrice') }}</span>
+            <strong>{{ chartSummary()!.minPrice | number:'1.2-2' }}</strong>
+          </div>
+          <div>
+            <span>{{ i18n.t('maxPrice') }}</span>
+            <strong>{{ chartSummary()!.maxPrice | number:'1.2-2' }}</strong>
+          </div>
+        </div>
+        <div class="chart-shell">
+          <div #chartHost class="price-chart-host"></div>
+        </div>
+      }
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('tradeEvents') }} <span class="inline-count">{{ tradeEvents().length }}</span></h3>
+      </div>
+      <div class="mark-table">
+        <table>
+          <thead>
+            <tr>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('lotId')">{{ i18n.t('lotId') }}{{ eventSortMarker('lotId') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('buyDate')">{{ i18n.t('buyDate') }}{{ eventSortMarker('buyDate') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('sellDate')">{{ i18n.t('sellDate') }}{{ eventSortMarker('sellDate') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('buyPrice')">{{ i18n.t('buyPrice') }}{{ eventSortMarker('buyPrice') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('sellPrice')">{{ i18n.t('sellPrice') }}{{ eventSortMarker('sellPrice') }}</button></th>
+              <th><button type="button" class="sort-button" (click)="toggleEventSort('pnlPct')">{{ i18n.t('pnlPct') }}{{ eventSortMarker('pnlPct') }}</button></th>
+            </tr>
+          </thead>
+          <tbody>
+            @for (event of tradeEvents(); track event.lotId) {
+              <tr>
+                <td>#{{ event.lotId }}</td>
+                <td>{{ event.buyDate }}</td>
+                <td>{{ event.sellDate || 'N/A' }}</td>
+                <td>{{ event.buyPrice | number:'1.2-2' }}</td>
+                <td>{{ event.sellPrice === null ? 'N/A' : (event.sellPrice | number:'1.2-2') }}</td>
+                <td [class]="pnlClass(event.pnlPct)">{{ event.pnlPct === null ? 'N/A' : (event.pnlPct | number:'1.2-2') + '%' }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="lot-stack">
+      @for (lot of lifecycle()!.lots; track lot.id) {
+        <article class="lot-card">
+          <div class="lot-head">
+            <div>
+              <span>{{ i18n.t('entry') }}</span>
+              <strong>{{ lot.entry_trade_date }} @ {{ lot.entry_price_open | number:'1.2-2' }}</strong>
+            </div>
+            <div>
+              <span>{{ i18n.t('exit') }}</span>
+              <strong>
+                {{
+                  lot.exit_trade_date
+                    ? lot.exit_trade_date + ' @ ' + (lot.exit_price_open! | number:'1.2-2')
+                    : i18n.t('stillOpen')
+                }}
+              </strong>
+            </div>
+            <div>
+              <span>{{ i18n.t('shares') }}</span>
+              <strong>{{ lot.shares }}</strong>
+            </div>
+            <div>
+              <span>{{ i18n.t('realized') }}</span>
+              <strong [class]="pnlClass(lot.realized_pnl)">
+                {{ lot.realized_pnl === null ? i18n.t('open') : (lot.realized_pnl | number:'1.2-2') }}
+              </strong>
+            </div>
+            <div>
+              <span>{{ i18n.t('latestMark') }}</span>
+              <strong>
+                {{
+                  latestMark(lot.marks)
+                    ? latestMark(lot.marks)!.trade_date + ' / ' + (latestMark(lot.marks)!.close_price | number:'1.2-2')
+                    : 'N/A'
+                }}
+              </strong>
+            </div>
+            <div>
+              <span>{{ i18n.t('latestUnrealized') }}</span>
+              <strong [class]="pnlClass(latestMark(lot.marks)?.unrealized_pnl)">
+                {{
+                  latestMark(lot.marks)
+                    ? (latestMark(lot.marks)!.unrealized_pnl | number:'1.2-2')
+                    : 'N/A'
+                }}
+              </strong>
+            </div>
+          </div>
+
+          <div class="mark-table">
+            <table>
+              <thead>
+                <tr>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('trade_date')">{{ i18n.t('tradeDate') }}{{ markSortMarker('trade_date') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('close_price')">{{ i18n.t('close') }}{{ markSortMarker('close_price') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('market_value')">{{ i18n.t('marketValue') }}{{ markSortMarker('market_value') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('unrealized_pnl')">{{ i18n.t('unrealizedPnl') }}{{ markSortMarker('unrealized_pnl') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('unrealized_return_pct')">{{ i18n.t('returnPct') }}{{ markSortMarker('unrealized_return_pct') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('is_in_top20')">{{ i18n.t('top20') }}{{ markSortMarker('is_in_top20') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleMarkSort('is_in_top10')">{{ i18n.t('top10') }}{{ markSortMarker('is_in_top10') }}</button></th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (mark of sortedMarks(lot.marks); track mark.id) {
+                  <tr>
+                    <td>{{ mark.trade_date }}</td>
+                    <td>{{ mark.close_price | number:'1.2-2' }}</td>
+                    <td>{{ mark.market_value | number:'1.2-2' }}</td>
+                    <td [class]="pnlClass(mark.unrealized_pnl)">{{ mark.unrealized_pnl | number:'1.2-2' }}</td>
+                    <td [class]="pnlClass(mark.unrealized_return_pct)">{{ mark.unrealized_return_pct | number:'1.2-2' }}%</td>
+                    <td>{{ mark.is_in_top20 ? i18n.t('yes') : i18n.t('no') }}</td>
+                    <td>{{ mark.is_in_top10 ? i18n.t('yes') : i18n.t('no') }}</td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        </article>
+      }
+    </div>
+  }
+</section>

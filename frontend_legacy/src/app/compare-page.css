@@ -48,7 +48,7 @@ th {
 .notice {
   border: 1px solid var(--line);
   border-radius: 20px;
-  background: linear-gradient(180deg, rgba(16, 30, 49, 0.95), rgba(10, 19, 32, 0.94));
+  background: rgba(255, 252, 247, 0.84);
   box-shadow: var(--shadow);
 }
 
@@ -66,11 +66,11 @@ th {
 .model-badge {
   display: inline-block;
   margin-right: 8px;
-  border: 1px solid rgba(76, 141, 255, 0.28);
+  border: 1px solid rgba(12, 122, 90, 0.28);
   border-radius: 999px;
   padding: 2px 8px;
-  background: rgba(76, 141, 255, 0.14);
-  color: #88b4ff;
+  background: rgba(12, 122, 90, 0.1);
+  color: var(--accent);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -85,7 +85,7 @@ th {
 }
 
 .selected-row {
-  background: rgba(76, 141, 255, 0.1);
+  background: rgba(12, 122, 90, 0.08);
 }
 
 .panel {
@@ -103,8 +103,7 @@ th {
   border: 1px solid var(--line);
   border-radius: 999px;
   padding: 9px 12px;
-  background: rgba(255, 255, 255, 0.04);
-  color: var(--text);
+  background: rgba(255, 255, 255, 0.56);
   font: inherit;
   cursor: pointer;
 }
@@ -119,9 +118,9 @@ th {
 }
 
 .chip.active {
-  border-color: rgba(76, 141, 255, 0.36);
-  background: rgba(76, 141, 255, 0.12);
-  color: #edf4ff;
+  border-color: rgba(12, 122, 90, 0.4);
+  background: var(--accent-soft);
+  color: var(--accent);
 }
 
 .sort-button {
@@ -139,7 +138,7 @@ th {
   overflow: auto;
   border: 1px solid var(--line);
   border-radius: 18px;
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.56);
 }
 
 table {
@@ -155,10 +154,6 @@ td {
   white-space: nowrap;
 }
 
-td {
-  color: var(--text);
-}
-
 .notice.error {
   background: var(--danger-soft);
   color: var(--danger);
@@ -166,7 +161,7 @@ td {
 }
 
 .up {
-  color: var(--success);
+  color: var(--accent);
 }
 
 .down {

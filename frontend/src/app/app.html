@@ -1,150 +1,151 @@
-<main class="shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <p class="eyebrow">{{ i18n.t('operatorConsole') }}</p>
-      <h1>IB Qlib</h1>
-      <p class="muted">{{ i18n.t('consoleSubtitle') }}</p>
+<main class="app-shell">
+  <button type="button" class="mobile-backdrop" [class.open]="navOpen()" (click)="closeNav()"></button>
+
+  <aside class="sidebar" [class.open]="navOpen()">
+    <div class="sidebar-head">
+      <div class="brand-lockup">
+        <div class="brand-mark">IB</div>
+        <div>
+          <p class="brand-kicker">IB Qlib Pipeline</p>
+          <h1>Operator Console</h1>
+        </div>
+      </div>
+      <button type="button" class="sidebar-close" (click)="closeNav()">×</button>
     </div>
 
-    <nav class="nav-tabs">
-      <a routerLink="/operations" routerLinkActive="active">{{ i18n.t('operations') }}</a>
-      <a routerLink="/rankings" routerLinkActive="active">{{ i18n.t('dailyRankings') }}</a>
-      <a routerLink="/compare" routerLinkActive="active">{{ i18n.t('compareStocks') }}</a>
-      <a
-        [routerLink]="state.symbolsInRun().length ? ['/symbols', state.symbolsInRun()[0]] : ['/rankings']"
-        routerLinkActive="active"
-      >
-        {{ i18n.t('symbolDetail') }}
-      </a>
-    </nav>
-
-    <section class="side-block">
-      <div class="side-head">
-        <h2>{{ i18n.t('language') }}</h2>
-      </div>
-      <div class="lang-switch">
-        <button
-          type="button"
-          class="lang-button"
-          [class.active]="i18n.language() === 'zh'"
-          (click)="setLanguage('zh')"
+    <section class="nav-group">
+      <p class="nav-label">{{ i18n.t('main') }}</p>
+      <nav class="nav-list">
+        <a routerLink="/dashboard" routerLinkActive="active" (click)="closeNav()">{{ i18n.t('dashboard') }}</a>
+        <a routerLink="/operations" routerLinkActive="active" (click)="closeNav()">{{ i18n.t('operations') }}</a>
+        <a routerLink="/rankings" routerLinkActive="active" (click)="closeNav()">{{ i18n.t('dailyRankings') }}</a>
+        <a routerLink="/compare" routerLinkActive="active" (click)="closeNav()">{{ i18n.t('compareStocks') }}</a>
+        <a
+          [routerLink]="state.symbolsInRun().length ? ['/symbols', state.symbolsInRun()[0]] : ['/rankings']"
+          routerLinkActive="active"
+          (click)="closeNav()"
         >
-          {{ i18n.t('chinese') }}
-        </button>
-        <button
-          type="button"
-          class="lang-button"
-          [class.active]="i18n.language() === 'en'"
-          (click)="setLanguage('en')"
-        >
-          {{ i18n.t('english') }}
-        </button>
-      </div>
+          {{ i18n.t('symbolDetail') }}
+        </a>
+      </nav>
     </section>
 
-    <section class="side-block">
-      <div class="side-head">
-        <h2>{{ i18n.t('backend') }}</h2>
-      </div>
-      <div class="meta-card">
-        <strong>{{ state.backendConfig() ? i18n.t('connected') : i18n.t('unavailable') }}</strong>
-        <small>{{ state.backendConfig()?.db_path || i18n.t('waitingConfig') }}</small>
-      </div>
-    </section>
-
-    <section class="side-block">
-      <div class="side-head">
-        <h2>{{ i18n.t('portfolioRuns') }}</h2>
+    <section class="nav-group context">
+      <div class="block-head">
+        <h2>{{ i18n.t('workspace') }}</h2>
         <span>{{ state.isLoading() ? i18n.t('loading') : state.portfolioRuns().length }}</span>
       </div>
-      <div class="stack">
-        @for (run of state.portfolioRuns(); track run.id) {
-          <button
-            type="button"
-            class="item-card"
-            [class.active]="state.selectedPortfolioRunId() === run.id"
-            (click)="onPortfolioRunClick(run.id)"
-          >
-            <strong>#{{ run.id }} {{ run.name }}</strong>
-            <span>{{ run.start_signal_date }} -> {{ run.end_signal_date || 'open' }}</span>
-            <span>
-              {{ i18n.t('model') }}:
-              <span class="model-badge">{{ run.model_key || 'n/a' }}</span>
-              {{ run.model_name || 'N/A' }}
-            </span>
-            <span>{{ run.lot_count }} lots / {{ run.open_lot_count || 0 }} open</span>
-          </button>
-        }
-      </div>
-    </section>
 
-    <section class="side-block">
-      <div class="side-head">
-        <h2>{{ i18n.t('rankingDates') }}</h2>
-        <span>{{ state.rankingDatesTotal() }}</span>
+      <div class="context-block">
+        <div class="block-head tight">
+          <h3>{{ i18n.t('portfolioRuns') }}</h3>
+        </div>
+        <div class="context-stack">
+          @for (run of state.portfolioRuns(); track run.id) {
+            <button
+              type="button"
+              class="context-card"
+              [class.active]="state.selectedPortfolioRunId() === run.id"
+              (click)="onPortfolioRunClick(run.id)"
+            >
+              <strong>#{{ run.id }} {{ run.name }}</strong>
+              <span>{{ run.start_signal_date }} -> {{ run.end_signal_date || 'open' }}</span>
+              <span class="meta-inline">
+                <span class="badge">{{ run.model_key || 'n/a' }}</span>
+                {{ run.model_name || 'N/A' }}
+              </span>
+            </button>
+          }
+        </div>
       </div>
-      <input
-        #dateBox
-        class="side-input"
-        type="text"
-        [value]="state.rankingDateFilter()"
-        [placeholder]="i18n.t('filterDate')"
-        (input)="onRankingDateFilter(dateBox.value)"
-      />
-      <div class="stack compact" (scroll)="onRankingDatesScroll($event)">
-        @for (run of state.rankingDates(); track run.run_id) {
-          <button
-            type="button"
-            class="item-card compact"
-            [class.active]="state.selectedRankingRunId() === run.run_id"
-            (click)="onRankingRunClick(run.run_id)"
-          >
-            <strong>{{ run.signal_date || 'N/A' }}</strong>
-            <span>#{{ run.run_id }} / {{ run.row_count || 0 }} rows</span>
-            <span>
-              {{ i18n.t('model') }}:
-              <span class="model-badge">{{ run.model_key || 'n/a' }}</span>
-              {{ run.model_name || 'N/A' }}
-            </span>
-          </button>
-        }
-        @if (state.rankingDatesLoading()) {
-          <div class="list-status">{{ i18n.t('loadingMore') }}</div>
-        } @else if (state.rankingDatesHasMore()) {
-          <button type="button" class="load-more" (click)="loadMoreRankingDates()">
-            {{ i18n.t('load20More') }}
-          </button>
-        } @else if (state.rankingDates().length > 0) {
-          <div class="list-status muted">{{ i18n.t('endOfList') }}</div>
-        }
-      </div>
-    </section>
 
-    <section class="side-block">
-      <div class="side-head">
-        <h2>{{ i18n.t('symbols') }}</h2>
-        <span>{{ state.symbolsInRun().length }}</span>
+      <div class="context-block">
+        <div class="block-head tight">
+          <h3>{{ i18n.t('rankingDates') }}</h3>
+          <span>{{ state.rankingDatesTotal() }}</span>
+        </div>
+        <input
+          #dateBox
+          class="context-input"
+          type="text"
+          [value]="state.rankingDateFilter()"
+          [placeholder]="i18n.t('filterDate')"
+          (input)="onRankingDateFilter(dateBox.value)"
+        />
+        <div class="context-stack compact" (scroll)="onRankingDatesScroll($event)">
+          @for (run of state.rankingDates(); track run.run_id) {
+            <button
+              type="button"
+              class="context-card compact"
+              [class.active]="state.selectedRankingRunId() === run.run_id"
+              (click)="onRankingRunClick(run.run_id)"
+            >
+              <strong>{{ run.signal_date || 'N/A' }}</strong>
+              <span>#{{ run.run_id }} / {{ run.row_count || 0 }} rows</span>
+              <span class="meta-inline">
+                <span class="badge">{{ run.model_key || 'n/a' }}</span>
+                {{ run.model_name || 'N/A' }}
+              </span>
+            </button>
+          }
+          @if (state.rankingDatesLoading()) {
+            <div class="list-status">{{ i18n.t('loadingMore') }}</div>
+          } @else if (state.rankingDatesHasMore()) {
+            <button type="button" class="load-more" (click)="loadMoreRankingDates()">
+              {{ i18n.t('load20More') }}
+            </button>
+          }
+        </div>
       </div>
-      <input
-        #symbolBox
-        class="side-input"
-        type="text"
-        [value]="state.symbolFilter()"
-        [placeholder]="i18n.t('searchSymbol')"
-        (input)="onSymbolFilter(symbolBox.value)"
-      />
-      <div class="symbol-list">
-        @for (symbol of state.symbolsInRun(); track symbol) {
-          <a class="symbol-link" [routerLink]="['/symbols', symbol]">{{ symbol }}</a>
-        }
+
+      <div class="context-block">
+        <div class="block-head tight">
+          <h3>{{ i18n.t('symbols') }}</h3>
+          <span>{{ state.symbolsInRun().length }}</span>
+        </div>
+        <input
+          #symbolBox
+          class="context-input"
+          type="text"
+          [value]="state.symbolFilter()"
+          [placeholder]="i18n.t('searchSymbol')"
+          (input)="onSymbolFilter(symbolBox.value)"
+        />
+        <div class="symbol-grid">
+          @for (symbol of state.symbolsInRun(); track symbol) {
+            <a class="symbol-pill" [routerLink]="['/symbols', symbol]" (click)="closeNav()">{{ symbol }}</a>
+          }
+        </div>
       </div>
     </section>
   </aside>
 
-  <section class="content">
-    @if (state.loadError()) {
-      <div class="notice error">{{ state.loadError() }}</div>
-    }
-    <router-outlet />
+  <section class="main-shell">
+    <header class="topbar">
+      <div class="topbar-left">
+        <button type="button" class="nav-toggle" (click)="toggleNav()">☰</button>
+        <div class="search-shell">
+          <span class="search-icon">⌕</span>
+          <input type="text" [placeholder]="i18n.t('searchPlaceholder')" disabled />
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="backend-pill">
+          <span class="status-dot" [class.live]="!!state.backendConfig()"></span>
+          {{ state.backendConfig() ? i18n.t('connected') : i18n.t('unavailable') }}
+        </div>
+        <div class="language-select">
+          <button type="button" [class.active]="i18n.language() === 'en'" (click)="setLanguage('en')">EN</button>
+          <button type="button" [class.active]="i18n.language() === 'zh'" (click)="setLanguage('zh')">中</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="content-shell">
+      @if (state.loadError()) {
+        <div class="notice error">{{ state.loadError() }}</div>
+      }
+      <router-outlet />
+    </section>
   </section>
 </main>
