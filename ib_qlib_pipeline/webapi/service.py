@@ -840,6 +840,10 @@ class RankingBackendService:
         ]
 
     def _config_path_for_model(self, model: dict[str, Any]) -> str:
+        details = model.get("details") or {}
+        model_config_path = details.get("config_path")
+        if isinstance(model_config_path, str) and model_config_path.strip():
+            return model_config_path.strip()
         universe_id = model.get("universe_id")
         if universe_id is not None:
             universe = get_universe_record(self.settings.db_path, int(universe_id))

@@ -5,12 +5,15 @@
 当前项目已经从“脚本集合”演进成一个可长期运行的小型服务，核心能力包括：
 
 - 从 IB 拉取并增量更新日线数据
+- 将共享日线同步写入 `market_daily.sqlite3`
 - 生成 Qlib CSV 和 Qlib bin
 - 运行多套 Qlib workflow 训练 / 验证 / 预测
+- 使用 bulk backfill 作为默认训练 / 回填入口
 - 导出 ranking CSV / HTML
 - 将 ranking 写入 SQLite
 - 基于 ranking 回放 portfolio lot / mark 生命周期
-- 通过 FastAPI + Angular UI 查看 ranking、股票详情、模型比较和任务状态
+- 管理 universe / strategy / model / portfolio 元数据
+- 通过 FastAPI + Angular UI 查看 ranking、portfolio、股票详情、模型比较和任务状态
 - 通过 `/operations` 执行或定时调度 `Daily Close Pipeline`
 
 ## 当前主入口
@@ -67,17 +70,21 @@ ib-qlib-pipeline/
 
 - 从 IB 拉增量日线
 - 写 `data/raw/prices/*.csv`
+- 写共享 daily SQLite：`data/market/market_daily.sqlite3`
 - 写 `data/processed/qlib_csv/*.csv`
 - 可选更新 `company_meta`
 - 调用 Qlib `dump_bin`
 
 ### 2. Ranking 生成
 
-`backfill_rankings.py` 和 `oneclick_daily_ranking.py` 负责：
+当前默认入口是 `backfill_rankings_bulk.py`，旧的 `backfill_rankings.py` 仍保留作兼容 / 单日补跑。
+
+bulk backfill 负责：
 
 - 生成 runtime workflow
 - 调用 `qrun`
-- 从本次唯一 experiment / recorder 读取 `pred.pkl`
+- 从本次唯一 experiment / recorder 读取一次 `pred.pkl`
+- 再按多个 `signal_date` 切分并导出 ranking
 - 生成 ranking CSV / HTML
 - 写 SQLite `runs` / `recommendations`
 
@@ -125,6 +132,12 @@ ib-qlib-pipeline/
 - 服务不一定每天都开着
 - 只要之后重新跑一次 pipeline，系统会尽量补齐中间缺失的 ranking 和 portfolio
 
+当前 pipeline 已经是 universe-aware：
+
+- `SP500` 模型走 `config.yaml`
+- `Union` 模型走 `config_union.yaml`
+- 特殊实验模型可通过 model-level `config_path` 覆盖 universe 默认配置
+
 ## 模型体系
 
 当前默认有两组模型族：
@@ -139,13 +152,27 @@ ib-qlib-pipeline/
 - `XGBoost_5D`
 - `CatBoost_5D`
 
+此外当前还包含：
+
+- `Union` universe 对应的默认 / 5D 模型族
+- `U16` 2016 训练窗实验族
+- `CAT1_U16` 这种单模型实验线
+
 这些模型会在 SQLite `models` 表中独立记录，并在 UI 中分开显示，不会互相污染。
+
+模型和实验当前主要按以下维度组织：
+
+- `Universe`
+- `Model`
+- `Strategy`
+- `Portfolio Run`
 
 ## 数据库
 
 当前默认数据库：
 
 - SQLite: `data/app/ranking_service.db`
+- Daily market SQLite: `data/market/market_daily.sqlite3`
 
 当前已经引入：
 
@@ -184,7 +211,18 @@ cp examples/config.example.yaml config.yaml
 主要配置来源：
 
 - `config.yaml`
+- `config_union.yaml`
 - 环境变量
+
+常见的实验线配置还包括：
+
+- `config_u16.yaml`
+- `config_u16_catboost_1d.yaml`
+
+原则上：
+
+- 原始日线和 `market_daily.sqlite3` 共享复用
+- `qlib_csv / qlib_bin` 按 universe 或实验线隔离
 
 重点环境变量：
 
@@ -251,10 +289,19 @@ FRONTEND_BACKEND_PORT=8001 ./start_frontend.sh
 
 主要页面：
 
+- `/dashboard`
+- `/portfolios`
 - `/rankings`
 - `/symbols/:symbol`
 - `/compare`
 - `/operations`
+
+当前前端已经把页面上下文同步到 URL。常见 query params：
+
+- `u` = universe id
+- `p` = portfolio run id
+- `r` = ranking run id
+- `symbols` = compare 页面 symbol 列表
 
 ## 推荐日常操作
 
@@ -286,13 +333,14 @@ FRONTEND_BACKEND_PORT=8001 ./start_frontend.sh
 
 - `python run.py`
 - `python backfill_rankings.py`
+- `python backfill_rankings_bulk.py`
 - `python simulate_portfolio.py`
 - `./run_daily_ranking.sh`
 
 但当前推荐顺序是：
 
 - 日常运行优先用 `/operations`
-- CLI 仅用于初始化 / 排错 / 批量 backfill
+- CLI 仅用于初始化 / 排错 / 特殊实验线 backfill
 
 更底层的 one-click ranking 说明见：
 

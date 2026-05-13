@@ -219,6 +219,21 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "notes": "Union 5D experiment with 2016 training start and 8 threads",
         },
     },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "cat1_u16",
+        "name": "CAT1_U16",
+        "model_class": "CatBoostModel",
+        "module_path": "qlib.contrib.model.catboost_model",
+        "workflow_base": "examples/u16_catboost_1d.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "u16_1d",
+            "scope": "union",
+            "config_path": "config_u16_catboost_1d.yaml",
+            "notes": "Union 1D CatBoost experiment with 2016 training start and 8 threads",
+        },
+    },
 ]
 
 

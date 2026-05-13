@@ -240,7 +240,7 @@ class StoreTestCase(unittest.TestCase):
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)
-        self.assertEqual(15, len(models))
+        self.assertEqual(16, len(models))
         self.assertEqual("LightGBM_Default", get_model_by_key(self.db_path, "lgb")["name"])
         self.assertEqual("XGBoost_5D", get_model_by_key(self.db_path, "xgb_5d")["name"])
         self.assertEqual(
@@ -251,6 +251,7 @@ class StoreTestCase(unittest.TestCase):
             "CatBoost_5D_Union",
             get_model_by_key(self.db_path, "catboost_5d_union")["name"],
         )
+        self.assertEqual("CAT1_U16", get_model_by_key(self.db_path, "cat1_u16")["name"])
         self.assertEqual(
             "US Union 524",
             get_model_by_key(self.db_path, "xgb5_u16")["universe_name"],
