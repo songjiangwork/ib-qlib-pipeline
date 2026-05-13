@@ -26,6 +26,28 @@ export class DailyRankingsPage {
   protected readonly sortedRankingDates = computed(() =>
     [...this.state.rankingDates()].sort((a, b) => b.signal_date.localeCompare(a.signal_date)),
   );
+  protected readonly effectiveUniverseId = computed(() => {
+    const raw = this.queryUniverseId();
+    const parsed = raw ? Number(raw) : null;
+    return parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : this.state.selectedUniverseId();
+  });
+  protected readonly effectivePortfolioRunId = computed(() => {
+    const raw = this.queryPortfolioRunId();
+    const parsed = raw ? Number(raw) : null;
+    return parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : this.state.selectedPortfolioRunId();
+  });
+  protected readonly effectiveRankingRunId = computed(() => {
+    const raw = this.queryRankingRunId();
+    const parsed = raw ? Number(raw) : null;
+    return parsed && Number.isFinite(parsed) && parsed > 0 ? parsed : this.state.selectedRankingRunId();
+  });
+  protected readonly availablePortfolioRuns = computed(() => {
+    const universeId = this.effectiveUniverseId();
+    if (universeId === null) {
+      return this.state.portfolioRuns();
+    }
+    return this.state.portfolioRuns().filter((run) => run.universe_id === universeId);
+  });
   protected readonly currentPortfolioRunName = computed(() => {
     const run = this.state.selectedPortfolioRun();
     return run ? `#${run.id} ${run.name}` : 'N/A';
@@ -64,12 +86,16 @@ export class DailyRankingsPage {
   });
 
   private readonly selectedRankingIndex = computed(() => {
-    const runId = this.state.selectedRankingRunId();
+    const runId = this.effectiveRankingRunId();
     if (runId === null) {
       return -1;
     }
     return this.sortedRankingDates().findIndex((item) => item.run_id === runId);
   });
+
+  protected selectValue(value: number | null | undefined): string {
+    return value === null || value === undefined ? '' : `${value}`;
+  }
 
   private readonly queryUniverseId = toSignal(
     this.route.queryParamMap.pipe(map((params) => params.get('u'))),
@@ -121,7 +147,15 @@ export class DailyRankingsPage {
     if (!Number.isFinite(portfolioRunId) || portfolioRunId <= 0) {
       return;
     }
-    await this.state.selectPortfolioRun(portfolioRunId);
+    const run = this.state.portfolioRuns().find((item) => item.id === portfolioRunId) ?? null;
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        u: run?.universe_id ?? this.effectiveUniverseId(),
+        p: portfolioRunId,
+        r: null,
+      },
+    });
   }
 
   protected async onUniverseChange(value: string): Promise<void> {
@@ -129,7 +163,14 @@ export class DailyRankingsPage {
     if (!Number.isFinite(universeId) || universeId <= 0) {
       return;
     }
-    await this.state.selectUniverse(universeId);
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        u: universeId,
+        p: null,
+        r: null,
+      },
+    });
   }
 
   protected async onRankingRunChange(value: string): Promise<void> {
@@ -137,7 +178,14 @@ export class DailyRankingsPage {
     if (!Number.isFinite(runId) || runId <= 0) {
       return;
     }
-    await this.state.selectRankingRun(runId);
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        u: this.effectiveUniverseId(),
+        p: this.effectivePortfolioRunId(),
+        r: runId,
+      },
+    });
   }
 
   protected async goPreviousTradingDay(): Promise<void> {
@@ -145,7 +193,14 @@ export class DailyRankingsPage {
     if (index < 0 || index >= this.sortedRankingDates().length - 1) {
       return;
     }
-    await this.state.selectRankingRun(this.sortedRankingDates()[index + 1].run_id);
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        u: this.effectiveUniverseId(),
+        p: this.effectivePortfolioRunId(),
+        r: this.sortedRankingDates()[index + 1].run_id,
+      },
+    });
   }
 
   protected async goNextTradingDay(): Promise<void> {
@@ -153,7 +208,14 @@ export class DailyRankingsPage {
     if (index <= 0) {
       return;
     }
-    await this.state.selectRankingRun(this.sortedRankingDates()[index - 1].run_id);
+    await this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: {
+        u: this.effectiveUniverseId(),
+        p: this.effectivePortfolioRunId(),
+        r: this.sortedRankingDates()[index - 1].run_id,
+      },
+    });
   }
 
   private compareRows(

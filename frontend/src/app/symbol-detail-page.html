@@ -4,7 +4,7 @@
       <label class="field">
         <span>{{ i18n.t('portfolioRun') }}</span>
         <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
-          @for (run of state.filteredPortfolioRuns(); track run.id) {
+          @for (run of state.portfolioRuns(); track run.id) {
             <option [value]="run.id">#{{ run.id }} {{ run.name }} · {{ run.model_name || 'N/A' }}</option>
           }
         </select>

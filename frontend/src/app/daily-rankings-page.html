@@ -3,27 +3,27 @@
     <div class="context-grid">
       <label class="field">
         <span>{{ i18n.t('universe') }}</span>
-        <select [value]="state.selectedUniverseId() || ''" (change)="onUniverseChange($any($event.target).value)">
+        <select (change)="onUniverseChange($any($event.target).value)">
           @for (universe of state.universes(); track universe.id) {
-            <option [value]="universe.id">{{ universe.name }}</option>
+            <option [value]="selectValue(universe.id)" [selected]="universe.id === effectiveUniverseId()">{{ universe.name }}</option>
           }
         </select>
       </label>
 
       <label class="field">
         <span>{{ i18n.t('portfolioRun') }}</span>
-        <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
-          @for (run of state.filteredPortfolioRuns(); track run.id) {
-            <option [value]="run.id">#{{ run.id }} {{ run.name }}</option>
+        <select (change)="onPortfolioRunChange($any($event.target).value)">
+          @for (run of availablePortfolioRuns(); track run.id) {
+            <option [value]="selectValue(run.id)" [selected]="run.id === effectivePortfolioRunId()">#{{ run.id }} {{ run.name }}</option>
           }
         </select>
       </label>
 
       <label class="field field-wide">
         <span>{{ i18n.t('rankingDates') }}</span>
-        <select [value]="state.selectedRankingRunId() || ''" (change)="onRankingRunChange($any($event.target).value)">
+        <select (change)="onRankingRunChange($any($event.target).value)">
           @for (run of sortedRankingDates(); track run.run_id) {
-            <option [value]="run.run_id">
+            <option [value]="selectValue(run.run_id)" [selected]="run.run_id === effectiveRankingRunId()">
               {{ run.signal_date || 'N/A' }} · #{{ run.run_id }} · {{ run.model_name || 'N/A' }}
             </option>
           }
