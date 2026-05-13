@@ -9,3 +9,4 @@ catboost_info/
 reports/
 .DS_Store
 .codex
+data_union/
