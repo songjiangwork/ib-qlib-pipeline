@@ -275,7 +275,7 @@
               @if (step.log_output) {
                 <details>
                   <summary>{{ i18n.t('stepLog') }}</summary>
-                  <pre #liveLog class="live-log">{{ step.log_output }}</pre>
+                  <pre #liveLog class="live-log" (scroll)="onLiveLogScroll($event)">{{ step.log_output }}</pre>
                 </details>
               }
               @if (step.error_text) {

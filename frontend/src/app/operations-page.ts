@@ -55,6 +55,8 @@ export class OperationsPage implements OnInit, OnDestroy {
   protected readonly scheduleDayOfWeek = signal('mon-fri');
   protected readonly scheduleTimezone = signal('America/Edmonton');
   private pollTimer: ReturnType<typeof setInterval> | null = null;
+  private lastAutoScrollSignature: string | null = null;
+  private autoFollowLogs = true;
   @ViewChildren('liveLog') private liveLogs!: QueryList<ElementRef<HTMLElement>>;
 
   protected readonly runningJobs = computed(() =>
@@ -85,11 +87,35 @@ export class OperationsPage implements OnInit, OnDestroy {
   }
 
   ngAfterViewChecked(): void {
-    if (this.state.selectedJobDetail()?.status === 'running' || this.state.selectedJobDetail()?.status === 'queued') {
-      for (const ref of this.liveLogs.toArray()) {
-        ref.nativeElement.scrollTop = ref.nativeElement.scrollHeight;
-      }
+    const detail = this.state.selectedJobDetail();
+    if (detail?.status !== 'running' && detail?.status !== 'queued') {
+      this.lastAutoScrollSignature = null;
+      this.autoFollowLogs = true;
+      return;
     }
+    const steps = detail.steps ?? [];
+    const signature = `${detail.id}:${detail.status}:${steps
+      .map((step) => `${step.id}:${step.log_output?.length ?? 0}`)
+      .join('|')}`;
+    if (signature === this.lastAutoScrollSignature) {
+      return;
+    }
+    this.lastAutoScrollSignature = signature;
+    if (!this.autoFollowLogs) {
+      return;
+    }
+    for (const ref of this.liveLogs.toArray()) {
+      ref.nativeElement.scrollTop = ref.nativeElement.scrollHeight;
+    }
+  }
+
+  protected onLiveLogScroll(event: Event): void {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) {
+      return;
+    }
+    const distanceFromBottom = target.scrollHeight - target.scrollTop - target.clientHeight;
+    this.autoFollowLogs = distanceFromBottom <= 8;
   }
 
   protected async runRefreshData(): Promise<void> {
@@ -124,6 +150,8 @@ export class OperationsPage implements OnInit, OnDestroy {
   }
 
   protected async openJob(jobId: number): Promise<void> {
+    this.autoFollowLogs = true;
+    this.lastAutoScrollSignature = null;
     await this.state.selectJob(jobId);
   }
 
