@@ -10,6 +10,7 @@ import pandas as pd
 from ib_qlib_pipeline.ranking.ranking_loader import (
     build_ranking_for_signal_date,
     load_ranking_dataframe,
+    read_available_trading_days,
     read_prediction_dataframe,
 )
 
@@ -91,6 +92,47 @@ class RankingLoaderTestCase(unittest.TestCase):
         self.assertEqual(dt.date(2026, 5, 9), pd.to_datetime(ranking.iloc[0]["signal_date"]).date())
         self.assertEqual(["AAA", "BBB"], ranking["symbol"].tolist())
         self.assertEqual([11.5, 21.5], ranking["close"].tolist())
+
+    def test_read_available_trading_days_uses_configured_qlib_bin_dir(self) -> None:
+        config_path = self.project_root / "config_cn.yaml"
+        qlib_dir = self.project_root / "data_cn" / "qlib" / "cn_data_custom" / "calendars"
+        qlib_dir.mkdir(parents=True, exist_ok=True)
+        (qlib_dir / "day.txt").write_text("2026-05-08\n2026-05-09\n", encoding="utf-8")
+        config_path.write_text(
+            "\n".join(
+                [
+                    "ib:",
+                    "  host: 127.0.0.1",
+                    "  port: 4002",
+                    "  client_id: 1",
+                    "  account: TEST",
+                    "  trading_mode: paper",
+                    "data:",
+                    "  symbols_file: symbols/cn_a_share.txt",
+                    "  start_date: \"2016-01-01\"",
+                    "  end_date: null",
+                    "  bar_size: \"1 day\"",
+                    "  what_to_show: \"TRADES\"",
+                    "  use_rth: true",
+                    "  request_pause_seconds: 0.0",
+                    "  with_news: false",
+                    "  include_news_body: false",
+                    "output:",
+                    "  root_dir: data_cn",
+                    "  raw_prices_dir: data_cn/raw/prices",
+                    "  raw_news_dir: data_cn/raw/news",
+                    "  qlib_csv_dir: data_cn/processed/qlib_csv",
+                    "  qlib_bin_dir: data_cn/qlib/cn_data_custom",
+                    "qlib:",
+                    "  enabled: false",
+                    "  qlib_repo_path: /tmp/qlib",
+                    "  python_bin: /tmp/qlib/.venv/bin/python",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        days = read_available_trading_days(self.project_root, config_path=config_path)
+        self.assertEqual([dt.date(2026, 5, 8), dt.date(2026, 5, 9)], days)
 
 
 if __name__ == "__main__":

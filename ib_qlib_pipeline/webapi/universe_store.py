@@ -36,6 +36,21 @@ DEFAULT_UNIVERSES: list[dict[str, Any]] = [
             "config_path": "config_union.yaml",
         },
     },
+    {
+        "key": "cn_a_share",
+        "name": "CN A-Share",
+        "symbols_file": "symbols/cn_a_share.txt",
+        "description": "Placeholder universe for future China A-share daily-data experiments",
+        "details": {
+            "family": "equity",
+            "scope": "cn_a_share",
+            "status": "planned",
+            "market": "cn",
+            "currency": "CNY",
+            "config_path": "config_cn.yaml",
+            "data_source": "external_daily",
+        },
+    },
 ]
 
 

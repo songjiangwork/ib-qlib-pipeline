@@ -148,11 +148,13 @@ class StoreTestCase(unittest.TestCase):
 
     def test_universe_store_defaults_and_model_binding(self) -> None:
         universes = list_universes(self.db_path)
-        self.assertEqual(2, len(universes))
+        self.assertEqual(3, len(universes))
         self.assertEqual("sp500", universes[0]["key"])
         self.assertEqual(503, universes[0]["symbol_count"])
         self.assertEqual("us_union_sp500_ndx_djia_sox", universes[1]["key"])
         self.assertEqual(524, universes[1]["symbol_count"])
+        self.assertEqual("cn_a_share", universes[2]["key"])
+        self.assertEqual(0, universes[2]["symbol_count"])
 
         sp500 = get_universe_by_key(self.db_path, "sp500")
         model = get_model_by_key(self.db_path, "lgb")
@@ -172,6 +174,11 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(524, len(union_symbols))
         self.assertEqual("MMM", union_symbols[0]["symbol"])
         self.assertEqual("WOLF", union_symbols[-1]["symbol"])
+
+        cn = get_universe_by_key(self.db_path, "cn_a_share")
+        self.assertIsNotNone(cn)
+        cn_symbols = list_universe_symbols(self.db_path, int(cn["id"]))
+        self.assertEqual([], cn_symbols)
 
     def test_universe_store_create_and_update(self) -> None:
         created = create_universe(
@@ -215,7 +222,7 @@ class StoreTestCase(unittest.TestCase):
         list_symbols_endpoint = route_map[("/api/universes/{universe_id}/symbols", ("GET",))]
 
         listed = list_endpoint()
-        self.assertEqual(2, len(listed))
+        self.assertEqual(3, len(listed))
 
         created_body = create_endpoint(
             UniverseCreate(

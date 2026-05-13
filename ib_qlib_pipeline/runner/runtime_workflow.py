@@ -35,7 +35,7 @@ def build_daily_runtime_workflow(
     workflow_stem = Path(workflow_base).stem.replace("workflow_", "")
     experiment_name = build_run_token(f"daily_{workflow_stem}_{latest_trade_date.isoformat()}")
     wf.setdefault("qlib_init", {})
-    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.qlib_bin_dir)
     wf["data_handler_config"]["end_time"] = latest_trade_date.isoformat()
     wf["task"]["dataset"]["kwargs"]["segments"]["test"][1] = latest_trade_date.isoformat()
     wf["port_analysis_config"]["backtest"]["end_time"] = backtest_end.isoformat()
@@ -58,7 +58,7 @@ def build_backfill_runtime_workflow(
     trade_date_str = trade_date.isoformat()
     experiment_name = build_run_token(f"backfill_{model_key}_{workflow_stem}_{trade_date_str}")
     wf.setdefault("qlib_init", {})
-    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.qlib_bin_dir)
     wf["data_handler_config"]["end_time"] = trade_date_str
     wf["task"]["dataset"]["kwargs"]["segments"]["test"][1] = trade_date_str
     wf["task"]["record"] = [
@@ -88,7 +88,7 @@ def build_bulk_backfill_runtime_workflow(
     end_date_str = end_date.isoformat()
     experiment_name = build_run_token(f"bulk_backfill_{model_key}_{workflow_stem}_{start_date_str}_{end_date_str}")
     wf.setdefault("qlib_init", {})
-    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.qlib_bin_dir)
     wf["data_handler_config"]["end_time"] = end_date_str
     wf["task"]["dataset"]["kwargs"]["segments"]["test"] = [start_date_str, end_date_str]
     wf["task"]["record"] = [

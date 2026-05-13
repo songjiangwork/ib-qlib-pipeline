@@ -12,6 +12,7 @@ import yaml
 class QlibRuntimeConfig:
     project_root: Path
     data_dir: Path
+    qlib_bin_dir: Path
     qlib_repo_path: Path
     qlib_python_bin: Path
     qlib_qrun_bin: Path
@@ -35,6 +36,10 @@ def load_qlib_runtime_config(project_root: Path, config_path: Path | None = None
     data_dir = _resolve_path(
         project_root,
         os.getenv("PROJECT_DATA_DIR", output_cfg.get("root_dir", "data")),
+    )
+    qlib_bin_dir = _resolve_path(
+        project_root,
+        output_cfg.get("qlib_bin_dir", "data/qlib/us_data_custom"),
     )
     qlib_repo_path = _resolve_path(
         project_root,
@@ -60,6 +65,7 @@ def load_qlib_runtime_config(project_root: Path, config_path: Path | None = None
     return QlibRuntimeConfig(
         project_root=project_root,
         data_dir=data_dir,
+        qlib_bin_dir=qlib_bin_dir,
         qlib_repo_path=qlib_repo_path,
         qlib_python_bin=qlib_python_bin,
         qlib_qrun_bin=qlib_qrun_bin,

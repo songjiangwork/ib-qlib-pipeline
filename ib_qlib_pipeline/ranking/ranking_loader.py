@@ -13,7 +13,7 @@ from ib_qlib_pipeline.runner.common import log
 
 def read_available_trading_days(project_root: Path, config_path: Path | None = None) -> list[dt.date]:
     runtime_cfg = load_qlib_runtime_config(project_root, config_path=config_path)
-    cal_path = runtime_cfg.data_dir / "qlib" / "us_data_custom" / "calendars" / "day.txt"
+    cal_path = runtime_cfg.qlib_bin_dir / "calendars" / "day.txt"
     if not cal_path.exists():
         raise SystemExit(f"Missing qlib calendar: {cal_path}")
     days = [

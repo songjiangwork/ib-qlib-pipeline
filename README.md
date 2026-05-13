@@ -157,6 +157,7 @@ bulk backfill 负责：
 - `Union` universe 对应的默认 / 5D 模型族
 - `U16` 2016 训练窗实验族
 - `CAT1_U16` 这种单模型实验线
+- `CN A-Share` 的接入骨架和占位 universe
 
 这些模型会在 SQLite `models` 表中独立记录，并在 UI 中分开显示，不会互相污染。
 
@@ -218,11 +219,25 @@ cp examples/config.example.yaml config.yaml
 
 - `config_u16.yaml`
 - `config_u16_catboost_1d.yaml`
+- `config_cn.yaml`
 
 原则上：
 
 - 原始日线和 `market_daily.sqlite3` 共享复用
 - `qlib_csv / qlib_bin` 按 universe 或实验线隔离
+
+### A 股准备状态
+
+当前仓库已经预留：
+
+- `config_cn.yaml`
+- `symbols/cn_a_share.txt`
+- 默认 universe: `cn_a_share`
+
+但这条线默认按“外部日线 CSV -> materialize -> qlib”接入，不直接复用当前 IB / 美股抓取脚本。
+说明见：
+
+- [docs/cn-a-share-onboarding.md](docs/cn-a-share-onboarding.md)
 
 重点环境变量：
 
