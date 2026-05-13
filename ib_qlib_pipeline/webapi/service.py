@@ -799,27 +799,14 @@ class RankingBackendService:
         client_id: int,
         config_path: str = "config.yaml",
     ) -> list[str]:
-        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
-        return [
-            str(python_bin),
-            "backfill_rankings.py",
-            "--config",
-            config_path,
-            "--start-date",
-            signal_date,
-            "--end-date",
-            signal_date,
-            "--workflow-base",
-            workflow_base,
-            "--model-id",
-            str(model_id),
-            "--client-id",
-            str(client_id),
-            "--html-mode",
-            "cached",
-            "--skip-existing-db",
-            "--skip-existing-files",
-        ]
+        return self._build_bulk_backfill_command(
+            start_date=signal_date,
+            end_date=signal_date,
+            workflow_base=workflow_base,
+            model_id=model_id,
+            client_id=client_id,
+            config_path=config_path,
+        )
 
     def _build_bulk_backfill_command(
         self,
