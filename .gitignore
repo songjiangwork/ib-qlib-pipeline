@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 data/
 data/app/
+data_cn/
 config.yaml
 mlruns/
 catboost_info/
