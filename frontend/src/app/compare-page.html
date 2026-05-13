@@ -4,7 +4,7 @@
       <label class="field field-wide">
         <span>{{ i18n.t('portfolioRun') }}</span>
         <select [value]="state.selectedPortfolioRunId() || ''" (change)="onPortfolioRunChange($any($event.target).value)">
-          @for (run of state.portfolioRuns(); track run.id) {
+          @for (run of state.filteredPortfolioRuns(); track run.id) {
             <option [value]="run.id">#{{ run.id }} {{ run.name }} · {{ run.model_name || 'N/A' }}</option>
           }
         </select>
@@ -59,61 +59,6 @@
   @if (state.detailError()) {
     <div class="notice error">{{ state.detailError() }}</div>
   }
-
-  <section class="panel">
-    <div class="panel-head">
-      <h3>{{ i18n.t('portfolioRunLeaderboard') }}</h3>
-      <span>{{ portfolioRunRows().length }}</span>
-    </div>
-    <p class="muted">{{ i18n.t('portfolioRunLeaderboardSubtitle') }}</p>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('id')">ID{{ runSortMarker('id') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('name')">{{ i18n.t('portfolioRun') }}{{ runSortMarker('name') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('modelName')">{{ i18n.t('model') }}{{ runSortMarker('modelName') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('workflowBase')">{{ i18n.t('workflow') }}{{ runSortMarker('workflowBase') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('lotCount')">{{ i18n.t('lots') }}{{ runSortMarker('lotCount') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('closedLots')">{{ i18n.t('closedLots') }}{{ runSortMarker('closedLots') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('openLots')">{{ i18n.t('openLots') }}{{ runSortMarker('openLots') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgHoldDays')">{{ i18n.t('avgHoldDays') }}{{ runSortMarker('avgHoldDays') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('winRatePct')">{{ i18n.t('winRate') }}{{ runSortMarker('winRatePct') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('avgReturnPct')">{{ i18n.t('avgReturnPct') }}{{ runSortMarker('avgReturnPct') }}</button></th>
-            <th><button type="button" class="sort-button" (click)="toggleRunSort('totalRealizedPnl')">{{ i18n.t('realizedPnl') }}{{ runSortMarker('totalRealizedPnl') }}</button></th>
-            <th>{{ i18n.t('action') }}</th>
-          </tr>
-        </thead>
-        <tbody>
-          @for (run of portfolioRunRows(); track run.id) {
-            <tr [class.selected-row]="run.isSelected">
-              <td>#{{ run.id }}</td>
-              <td>{{ run.name }}</td>
-              <td>
-                <span class="model-badge">{{ run.modelKey }}</span>
-                {{ run.modelName }}
-              </td>
-              <td>{{ run.workflowBase }}</td>
-              <td>{{ run.lotCount }}</td>
-              <td>{{ run.closedLots }}</td>
-              <td>{{ run.openLots }}</td>
-              <td>{{ run.avgHoldDays === null ? 'N/A' : (run.avgHoldDays | number:'1.1-1') }}</td>
-              <td>{{ run.winRatePct === null ? 'N/A' : (run.winRatePct | number:'1.1-1') + '%' }}</td>
-              <td [class]="pnlClass(run.avgReturnPct)">
-                {{ run.avgReturnPct === null ? 'N/A' : (run.avgReturnPct | number:'1.2-2') + '%' }}
-              </td>
-              <td [class]="pnlClass(run.totalRealizedPnl)">{{ run.totalRealizedPnl === null ? 'N/A' : (run.totalRealizedPnl | number:'1.2-2') }}</td>
-              <td>
-                <button type="button" class="action-button" (click)="selectPortfolioRun(run.id)">
-                  {{ run.isSelected ? i18n.t('selected') : i18n.t('choose') }}
-                </button>
-              </td>
-            </tr>
-          }
-        </tbody>
-      </table>
-    </div>
-  </section>
 
   <div class="grid">
     <section class="panel">

@@ -68,6 +68,26 @@
     </div>
   </div>
 
+  <section class="panel portfolio-hero">
+    <div class="panel-head">
+      <h3>{{ i18n.t('portfolioDetail') }}</h3>
+      <span>{{ currentPortfolioRunName() }}</span>
+    </div>
+    <div class="portfolio-metrics">
+      @for (item of portfolioMetrics(); track item.label) {
+        <article class="metric-card">
+          <span>{{ item.label }}</span>
+          <strong>
+            @if (item.badge) {
+              <span class="model-badge">{{ item.badge }}</span>
+            }
+            {{ item.value }}
+          </strong>
+        </article>
+      }
+    </div>
+  </section>
+
   @if (state.detailError()) {
     <div class="notice error">{{ state.detailError() }}</div>
   }

@@ -1,6 +1,8 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, computed, effect, inject, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
+import { map } from 'rxjs/operators';
 
 import { FrontendI18nService } from './frontend-i18n.service';
 import { FrontendStateService, PortfolioLot } from './frontend-state.service';
@@ -17,22 +19,6 @@ interface CompareRow {
   latestStatus: 'open' | 'closed' | 'mixed';
 }
 
-interface PortfolioRunRow {
-  id: number;
-  name: string;
-  modelKey: string;
-  modelName: string;
-  workflowBase: string;
-  lotCount: number;
-  closedLots: number;
-  openLots: number;
-  avgHoldDays: number | null;
-  winRatePct: number | null;
-  avgReturnPct: number | null;
-  totalRealizedPnl: number | null;
-  isSelected: boolean;
-}
-
 @Component({
   standalone: true,
   selector: 'app-compare-page',
@@ -43,12 +29,25 @@ interface PortfolioRunRow {
 export class ComparePage {
   protected readonly state = inject(FrontendStateService);
   protected readonly i18n = inject(FrontendI18nService);
+  private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly symbolFilter = signal('');
-  private readonly runSortKey = signal<keyof PortfolioRunRow>('totalRealizedPnl');
-  private readonly runSortDirection = signal<'asc' | 'desc'>('desc');
   private readonly symbolSortKey = signal<keyof CompareRow>('totalRealizedPnl');
   private readonly symbolSortDirection = signal<'asc' | 'desc'>('desc');
+  private readonly queryUniverseId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('u'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('u') },
+  );
+  private readonly queryPortfolioRunId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('p'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('p') },
+  );
+  private readonly querySymbols = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('symbols'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('symbols') },
+  );
+  private applyingQueryState = false;
+  private lastAppliedQueryKey: string | null = null;
 
   protected readonly filteredSymbolsInRun = computed(() => {
     const filter = this.symbolFilter().trim().toUpperCase();
@@ -63,25 +62,46 @@ export class ComparePage {
       .sort((a, b) => this.compareByKey(a, b, this.symbolSortKey(), this.symbolSortDirection()));
   });
 
-  protected readonly portfolioRunRows = computed(() => {
-    return [...this.state.portfolioRuns()]
-      .map((run) => ({
-        id: run.id,
-        name: run.name,
-        modelKey: run.model_key || 'n/a',
-        modelName: run.model_name || 'N/A',
-        workflowBase: this.workflowLabel(run.workflow_base),
-        lotCount: run.lot_count,
-        closedLots: run.closed_lot_count ?? 0,
-        openLots: run.open_lot_count ?? 0,
-        avgHoldDays: run.avg_hold_days ?? null,
-        winRatePct: run.win_rate_pct ?? null,
-        avgReturnPct: run.avg_return_pct ?? null,
-        totalRealizedPnl: run.total_realized_pnl ?? null,
-        isSelected: this.state.selectedPortfolioRunId() === run.id,
-      }))
-      .sort((a, b) => this.compareByKey(a, b, this.runSortKey(), this.runSortDirection()));
-  });
+  constructor() {
+    effect(() => {
+      const initialized = this.state.initialized();
+      const universe = this.queryUniverseId();
+      const portfolio = this.queryPortfolioRunId();
+      const symbols = this.querySymbols();
+      if (!initialized) {
+        return;
+      }
+      const key = `${universe ?? ''}|${portfolio ?? ''}|${symbols ?? ''}`;
+      if (this.applyingQueryState || this.lastAppliedQueryKey === key) {
+        return;
+      }
+      void this.applyQueryState(universe, portfolio, symbols, key);
+    });
+
+    effect(() => {
+      if (!this.state.initialized() || this.applyingQueryState) {
+        return;
+      }
+      const desired = {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+        symbols: this.state.compareSymbols().length ? this.state.compareSymbols().join(',') : null,
+      };
+      const current = {
+        u: this.queryUniverseId() ? Number(this.queryUniverseId()) : null,
+        p: this.queryPortfolioRunId() ? Number(this.queryPortfolioRunId()) : null,
+        symbols: this.querySymbols() || null,
+      };
+      if (desired.u === current.u && desired.p === current.p && desired.symbols === current.symbols) {
+        return;
+      }
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: desired,
+        replaceUrl: true,
+      });
+    });
+  }
 
   protected toggleSymbol(symbol: string): void {
     this.state.toggleCompareSymbol(symbol);
@@ -93,7 +113,12 @@ export class ComparePage {
 
   protected async openSymbol(symbol: string): Promise<void> {
     await this.state.loadSymbolLifecycle(symbol);
-    await this.router.navigate(['/symbols', symbol]);
+    await this.router.navigate(['/symbols', symbol], {
+      queryParams: {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+      },
+    });
   }
 
   protected async selectPortfolioRun(portfolioRunId: number): Promise<void> {
@@ -112,15 +137,6 @@ export class ComparePage {
     this.symbolFilter.set(value);
   }
 
-  protected toggleRunSort(key: keyof PortfolioRunRow): void {
-    if (this.runSortKey() === key) {
-      this.runSortDirection.set(this.runSortDirection() === 'asc' ? 'desc' : 'asc');
-      return;
-    }
-    this.runSortKey.set(key);
-    this.runSortDirection.set(key === 'name' || key === 'modelName' || key === 'workflowBase' ? 'asc' : 'desc');
-  }
-
   protected toggleSymbolSort(key: keyof CompareRow): void {
     if (this.symbolSortKey() === key) {
       this.symbolSortDirection.set(this.symbolSortDirection() === 'asc' ? 'desc' : 'asc');
@@ -128,10 +144,6 @@ export class ComparePage {
     }
     this.symbolSortKey.set(key);
     this.symbolSortDirection.set(key === 'symbol' || key === 'latestStatus' ? 'asc' : 'desc');
-  }
-
-  protected runSortMarker(key: keyof PortfolioRunRow): string {
-    return this.sortMarker(this.runSortKey(), this.runSortDirection(), key);
   }
 
   protected symbolSortMarker(key: keyof CompareRow): string {
@@ -197,14 +209,6 @@ export class ComparePage {
     return actual.reduce((sum, value) => sum + value, 0) / actual.length;
   }
 
-  private workflowLabel(value: string | null | undefined): string {
-    if (!value) {
-      return 'N/A';
-    }
-    const parts = value.split('/');
-    return parts[parts.length - 1] || value;
-  }
-
   private sortMarker(currentKey: string, currentDirection: 'asc' | 'desc', key: string): string {
     if (currentKey !== key) {
       return '';
@@ -239,5 +243,42 @@ export class ComparePage {
       return Number(a) - Number(b);
     }
     return Number(a) - Number(b);
+  }
+
+  private async applyQueryState(
+    universeParam: string | null,
+    portfolioParam: string | null,
+    symbolsParam: string | null,
+    key: string,
+  ): Promise<void> {
+    this.applyingQueryState = true;
+    try {
+      const universeId = universeParam ? Number(universeParam) : null;
+      const portfolioRunId = portfolioParam ? Number(portfolioParam) : null;
+
+      if (universeId && Number.isFinite(universeId) && universeId > 0 && this.state.selectedUniverseId() !== universeId) {
+        await this.state.selectUniverse(universeId);
+      }
+      if (
+        portfolioRunId &&
+        Number.isFinite(portfolioRunId) &&
+        portfolioRunId > 0 &&
+        this.state.selectedPortfolioRunId() !== portfolioRunId &&
+        this.state.portfolioRuns().some((run) => run.id === portfolioRunId)
+      ) {
+        await this.state.selectPortfolioRun(portfolioRunId);
+      }
+
+      const available = new Set(this.state.symbolsInRun());
+      const symbols = (symbolsParam ?? '')
+        .split(',')
+        .map((symbol) => symbol.trim().toUpperCase())
+        .filter((symbol) => symbol && available.has(symbol))
+        .slice(0, 5);
+      this.state.setCompareSymbols(symbols);
+      this.lastAppliedQueryKey = key;
+    } finally {
+      this.applyingQueryState = false;
+    }
   }
 }

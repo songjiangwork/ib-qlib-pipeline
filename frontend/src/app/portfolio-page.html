@@ -1,0 +1,77 @@
+<section class="page">
+  <div class="page-head">
+    <div>
+      <p class="eyebrow">{{ i18n.t('portfolio') }}</p>
+      <h2>{{ i18n.t('portfolio') }}</h2>
+      <p class="muted">{{ i18n.t('portfolioSubtitle') }}</p>
+    </div>
+    <div class="head-summaries">
+      <div class="summary">
+        <span>{{ i18n.t('portfolioRuns') }}</span>
+        <strong>{{ state.portfolioRuns().length }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('openLots') }}</span>
+        <strong>{{ totalOpenLots() }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('closedLots') }}</span>
+        <strong>{{ totalClosedLots() }}</strong>
+      </div>
+      <div class="summary">
+        <span>{{ i18n.t('selected') }}</span>
+        <strong>{{ selectedPortfolioName() }}</strong>
+      </div>
+    </div>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h3>{{ i18n.t('portfolioRuns') }}</h3>
+      <span>{{ portfolioRows().length }}</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th><button type="button" class="sort-button" (click)="toggleSort('id')">ID{{ sortMarker('id') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('name')">{{ i18n.t('portfolioRun') }}{{ sortMarker('name') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('universe_name')">{{ i18n.t('universe') }}{{ sortMarker('universe_name') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('model_name')">{{ i18n.t('model') }}{{ sortMarker('model_name') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('closed_lot_count')">{{ i18n.t('closedLots') }}{{ sortMarker('closed_lot_count') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('open_lot_count')">{{ i18n.t('openLots') }}{{ sortMarker('open_lot_count') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('win_rate_pct')">{{ i18n.t('winRate') }}{{ sortMarker('win_rate_pct') }}</button></th>
+            <th><button type="button" class="sort-button" (click)="toggleSort('total_realized_pnl')">{{ i18n.t('realizedPnl') }}{{ sortMarker('total_realized_pnl') }}</button></th>
+            <th>{{ i18n.t('action') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          @for (run of portfolioRows(); track run.id) {
+            <tr [class.selected-row]="state.selectedPortfolioRunId() === run.id">
+              <td>#{{ run.id }}</td>
+              <td>{{ run.name }}</td>
+              <td>{{ run.universe_name || 'N/A' }}</td>
+              <td>
+                @if (run.model_key) {
+                  <span class="model-badge">{{ run.model_key }}</span>
+                }
+                {{ run.model_name || 'N/A' }}
+              </td>
+              <td>{{ run.closed_lot_count ?? 0 }}</td>
+              <td>{{ run.open_lot_count ?? 0 }}</td>
+              <td>{{ run.win_rate_pct === null || run.win_rate_pct === undefined ? 'N/A' : (run.win_rate_pct | number:'1.1-1') + '%' }}</td>
+              <td [class]="pnlClass(run.total_realized_pnl)">
+                {{ run.total_realized_pnl === null || run.total_realized_pnl === undefined ? 'N/A' : (run.total_realized_pnl | number:'1.2-2') }}
+              </td>
+              <td>
+                <button type="button" class="action-button" (click)="openPortfolio(run.id)">
+                  {{ i18n.t('openDetail') }}
+                </button>
+              </td>
+            </tr>
+          }
+        </tbody>
+      </table>
+    </div>
+  </section>
+</section>

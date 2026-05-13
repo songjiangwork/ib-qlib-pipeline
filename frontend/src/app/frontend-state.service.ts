@@ -290,6 +290,7 @@ export class FrontendStateService {
   readonly loadError = signal<string | null>(null);
   readonly detailError = signal<string | null>(null);
   readonly isLoading = signal(false);
+  readonly initialized = signal(false);
 
   readonly selectedPortfolioRun = computed(() =>
     this.portfolioRuns().find((run) => run.id === this.selectedPortfolioRunId()) ?? null,
@@ -315,6 +316,7 @@ export class FrontendStateService {
   async loadInitial(): Promise<void> {
     this.isLoading.set(true);
     this.loadError.set(null);
+    this.initialized.set(false);
     try {
       const [config, runs, portfolioRuns, models, universes] = await Promise.all([
         firstValueFrom(this.http.get<BackendConfig>('/api/config')),
@@ -343,6 +345,7 @@ export class FrontendStateService {
     } catch {
       this.loadError.set(this.i18n.t('failedDashboard'));
     } finally {
+      this.initialized.set(true);
       this.isLoading.set(false);
     }
   }
@@ -742,6 +745,17 @@ export class FrontendStateService {
 
   clearCompareSymbols(): void {
     this.compareSymbols.set([]);
+  }
+
+  setCompareSymbols(symbols: string[]): void {
+    const normalized = Array.from(
+      new Set(
+        symbols
+          .map((symbol) => symbol.trim().toUpperCase())
+          .filter((symbol) => symbol.length > 0),
+      ),
+    ).slice(0, 5);
+    this.compareSymbols.set(normalized);
   }
 
   isCompareSelected(symbol: string): boolean {

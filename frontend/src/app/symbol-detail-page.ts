@@ -49,6 +49,14 @@ export class SymbolDetailPage {
     this.route.paramMap.pipe(map((params) => params.get('symbol'))),
     { initialValue: this.route.snapshot.paramMap.get('symbol') },
   );
+  private readonly queryUniverseId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('u'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('u') },
+  );
+  private readonly queryPortfolioRunId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('p'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('p') },
+  );
 
   private chartHostRef: HTMLDivElement | null = null;
   private chart: IChartApi | null = null;
@@ -60,6 +68,8 @@ export class SymbolDetailPage {
   private readonly eventSortDirection = signal<'asc' | 'desc'>('asc');
   private readonly markSortKey = signal<'trade_date' | 'close_price' | 'market_value' | 'unrealized_pnl' | 'unrealized_return_pct' | 'is_in_top20' | 'is_in_top10'>('trade_date');
   private readonly markSortDirection = signal<'asc' | 'desc'>('asc');
+  private applyingQueryState = false;
+  private lastAppliedQueryKey: string | null = null;
 
   protected readonly lifecycle = computed(() => this.state.selectedSymbolLifecycle());
   protected readonly priceBars = computed(() => this.state.selectedSymbolPriceBars());
@@ -126,6 +136,21 @@ export class SymbolDetailPage {
 
   constructor() {
     effect(() => {
+      const initialized = this.state.initialized();
+      const universe = this.queryUniverseId();
+      const portfolio = this.queryPortfolioRunId();
+      const symbol = this.routeSymbol();
+      if (!initialized) {
+        return;
+      }
+      const key = `${universe ?? ''}|${portfolio ?? ''}|${symbol ?? ''}`;
+      if (this.applyingQueryState || this.lastAppliedQueryKey === key) {
+        return;
+      }
+      void this.applyQueryState(universe, portfolio, symbol, key);
+    });
+
+    effect(() => {
       const symbol = this.routeSymbol();
       if (symbol) {
         void this.state.loadSymbolLifecycle(symbol);
@@ -137,6 +162,31 @@ export class SymbolDetailPage {
       this.lifecycle();
       this.selectedRange();
       this.syncChart();
+    });
+
+    effect(() => {
+      if (!this.state.initialized() || this.applyingQueryState) {
+        return;
+      }
+      const currentSymbol = this.routeSymbol();
+      if (!currentSymbol) {
+        return;
+      }
+      const desired = {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+      };
+      const current = {
+        u: this.queryUniverseId() ? Number(this.queryUniverseId()) : null,
+        p: this.queryPortfolioRunId() ? Number(this.queryPortfolioRunId()) : null,
+      };
+      if (desired.u === current.u && desired.p === current.p) {
+        return;
+      }
+      void this.router.navigate(['/symbols', currentSymbol], {
+        queryParams: desired,
+        replaceUrl: true,
+      });
     });
   }
 
@@ -222,7 +272,12 @@ export class SymbolDetailPage {
         : this.state.symbolsInRun()[0] ?? null;
     if (nextSymbol) {
       await this.state.loadSymbolLifecycle(nextSymbol);
-      await this.router.navigate(['/symbols', nextSymbol]);
+      await this.router.navigate(['/symbols', nextSymbol], {
+        queryParams: {
+          u: this.state.selectedUniverseId() ?? null,
+          p: this.state.selectedPortfolioRunId() ?? null,
+        },
+      });
     }
   }
 
@@ -232,7 +287,12 @@ export class SymbolDetailPage {
       return;
     }
     await this.state.loadSymbolLifecycle(symbol);
-    await this.router.navigate(['/symbols', symbol]);
+    await this.router.navigate(['/symbols', symbol], {
+      queryParams: {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+      },
+    });
   }
 
   protected setRange(range: ChartRange): void {
@@ -451,5 +511,51 @@ export class SymbolDetailPage {
       return Number(a) - Number(b);
     }
     return Number(a) - Number(b);
+  }
+
+  private async applyQueryState(
+    universeParam: string | null,
+    portfolioParam: string | null,
+    symbolParam: string | null,
+    key: string,
+  ): Promise<void> {
+    this.applyingQueryState = true;
+    try {
+      const universeId = universeParam ? Number(universeParam) : null;
+      const portfolioRunId = portfolioParam ? Number(portfolioParam) : null;
+
+      if (universeId && Number.isFinite(universeId) && universeId > 0 && this.state.selectedUniverseId() !== universeId) {
+        await this.state.selectUniverse(universeId);
+      }
+      if (
+        portfolioRunId &&
+        Number.isFinite(portfolioRunId) &&
+        portfolioRunId > 0 &&
+        this.state.selectedPortfolioRunId() !== portfolioRunId &&
+        this.state.portfolioRuns().some((run) => run.id === portfolioRunId)
+      ) {
+        await this.state.selectPortfolioRun(portfolioRunId);
+      }
+
+      const currentSymbol =
+        symbolParam && this.state.symbolsInRun().includes(symbolParam)
+          ? symbolParam
+          : (this.state.symbolsInRun()[0] ?? null);
+      if (currentSymbol) {
+        await this.state.loadSymbolLifecycle(currentSymbol);
+        if (currentSymbol !== symbolParam) {
+          await this.router.navigate(['/symbols', currentSymbol], {
+            queryParams: {
+              u: this.state.selectedUniverseId() ?? null,
+              p: this.state.selectedPortfolioRunId() ?? null,
+            },
+            replaceUrl: true,
+          });
+        }
+      }
+      this.lastAppliedQueryKey = key;
+    } finally {
+      this.applyingQueryState = false;
+    }
   }
 }

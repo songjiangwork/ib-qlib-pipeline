@@ -1,6 +1,7 @@
 .page {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .context-bar {
@@ -119,6 +120,11 @@ th {
   display: grid;
   grid-template-columns: minmax(280px, 0.95fr) minmax(0, 1.35fr);
   gap: 20px;
+  min-width: 0;
+}
+
+.grid > * {
+  min-width: 0;
 }
 
 .selected-row {

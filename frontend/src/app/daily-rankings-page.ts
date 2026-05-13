@@ -1,6 +1,8 @@
 import { CommonModule, DecimalPipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
-import { Router } from '@angular/router';
+import { Component, computed, effect, inject, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router } from '@angular/router';
+import { map } from 'rxjs/operators';
 
 import { FrontendI18nService } from './frontend-i18n.service';
 import { FrontendStateService } from './frontend-state.service';
@@ -15,6 +17,7 @@ import { FrontendStateService } from './frontend-state.service';
 export class DailyRankingsPage {
   protected readonly i18n = inject(FrontendI18nService);
   protected readonly state = inject(FrontendStateService);
+  private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly sortKey = signal<
     'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest'
@@ -23,6 +26,30 @@ export class DailyRankingsPage {
   protected readonly sortedRankingDates = computed(() =>
     [...this.state.rankingDates()].sort((a, b) => b.signal_date.localeCompare(a.signal_date)),
   );
+  protected readonly currentPortfolioRunName = computed(() => {
+    const run = this.state.selectedPortfolioRun();
+    return run ? `#${run.id} ${run.name}` : 'N/A';
+  });
+  protected readonly portfolioMetrics = computed(() => {
+    const run = this.state.selectedPortfolioRun();
+    if (!run) {
+      return [];
+    }
+    return [
+      { label: this.i18n.t('universe'), value: run.universe_name || 'N/A' },
+      { label: this.i18n.t('model'), value: run.model_name || 'N/A', badge: run.model_key || null },
+      { label: this.i18n.t('strategy'), value: run.strategy || 'N/A' },
+      { label: this.i18n.t('openLots'), value: String(run.open_lot_count ?? 0) },
+      { label: this.i18n.t('closedLots'), value: String(run.closed_lot_count ?? 0) },
+      {
+        label: this.i18n.t('realizedPnl'),
+        value:
+          run.total_realized_pnl === null || run.total_realized_pnl === undefined
+            ? 'N/A'
+            : run.total_realized_pnl.toFixed(2),
+      },
+    ];
+  });
   protected readonly canGoPreviousTradingDay = computed(() => {
     const index = this.selectedRankingIndex();
     return index >= 0 && index < this.sortedRankingDates().length - 1;
@@ -43,6 +70,21 @@ export class DailyRankingsPage {
     }
     return this.sortedRankingDates().findIndex((item) => item.run_id === runId);
   });
+
+  private readonly queryUniverseId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('u'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('u') },
+  );
+  private readonly queryPortfolioRunId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('p'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('p') },
+  );
+  private readonly queryRankingRunId = toSignal(
+    this.route.queryParamMap.pipe(map((params) => params.get('r'))),
+    { initialValue: this.route.snapshot.queryParamMap.get('r') },
+  );
+  private applyingQueryState = false;
+  private lastAppliedQueryKey: string | null = null;
 
   protected toggleSort(
     key: 'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest',
@@ -66,7 +108,12 @@ export class DailyRankingsPage {
 
   protected async openSymbol(symbol: string): Promise<void> {
     await this.state.loadSymbolLifecycle(symbol);
-    await this.router.navigate(['/symbols', symbol]);
+    await this.router.navigate(['/symbols', symbol], {
+      queryParams: {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+      },
+    });
   }
 
   protected async onPortfolioRunChange(value: string): Promise<void> {
@@ -144,5 +191,85 @@ export class DailyRankingsPage {
       return a.localeCompare(b);
     }
     return Number(a) - Number(b);
+  }
+
+  constructor() {
+    effect(() => {
+      const initialized = this.state.initialized();
+      const universe = this.queryUniverseId();
+      const portfolio = this.queryPortfolioRunId();
+      const ranking = this.queryRankingRunId();
+      if (!initialized) {
+        return;
+      }
+      const key = `${universe ?? ''}|${portfolio ?? ''}|${ranking ?? ''}`;
+      if (this.applyingQueryState || this.lastAppliedQueryKey === key) {
+        return;
+      }
+      void this.applyQueryState(universe, portfolio, ranking, key);
+    });
+
+    effect(() => {
+      if (!this.state.initialized() || this.applyingQueryState) {
+        return;
+      }
+      const desired = {
+        u: this.state.selectedUniverseId() ?? null,
+        p: this.state.selectedPortfolioRunId() ?? null,
+        r: this.state.selectedRankingRunId() ?? null,
+      };
+      const current = {
+        u: this.queryUniverseId() ? Number(this.queryUniverseId()) : null,
+        p: this.queryPortfolioRunId() ? Number(this.queryPortfolioRunId()) : null,
+        r: this.queryRankingRunId() ? Number(this.queryRankingRunId()) : null,
+      };
+      if (desired.u === current.u && desired.p === current.p && desired.r === current.r) {
+        return;
+      }
+      void this.router.navigate([], {
+        relativeTo: this.route,
+        queryParams: desired,
+        replaceUrl: true,
+      });
+    });
+  }
+
+  private async applyQueryState(
+    universeParam: string | null,
+    portfolioParam: string | null,
+    rankingParam: string | null,
+    key: string,
+  ): Promise<void> {
+    this.applyingQueryState = true;
+    try {
+      const universeId = universeParam ? Number(universeParam) : null;
+      const portfolioRunId = portfolioParam ? Number(portfolioParam) : null;
+      const rankingRunId = rankingParam ? Number(rankingParam) : null;
+
+      if (universeId && Number.isFinite(universeId) && universeId > 0 && this.state.selectedUniverseId() !== universeId) {
+        await this.state.selectUniverse(universeId);
+      }
+      if (
+        portfolioRunId &&
+        Number.isFinite(portfolioRunId) &&
+        portfolioRunId > 0 &&
+        this.state.selectedPortfolioRunId() !== portfolioRunId &&
+        this.state.portfolioRuns().some((run) => run.id === portfolioRunId)
+      ) {
+        await this.state.selectPortfolioRun(portfolioRunId);
+      }
+      if (
+        rankingRunId &&
+        Number.isFinite(rankingRunId) &&
+        rankingRunId > 0 &&
+        this.state.selectedRankingRunId() !== rankingRunId &&
+        this.state.rankingDates().some((item) => item.run_id === rankingRunId)
+      ) {
+        await this.state.selectRankingRun(rankingRunId);
+      }
+      this.lastAppliedQueryKey = key;
+    } finally {
+      this.applyingQueryState = false;
+    }
   }
 }
