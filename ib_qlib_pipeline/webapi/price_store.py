@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from functools import lru_cache
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -79,6 +79,37 @@ def list_price_bars(
         }
         for _, row in frame.iterrows()
     ]
+
+
+def load_close_lookup(
+    project_root: Path,
+    *,
+    symbols: Iterable[str],
+    signal_dates: Iterable[dt.date],
+) -> dict[tuple[str, dt.date], float]:
+    symbol_list = [str(symbol).strip() for symbol in symbols if str(symbol).strip()]
+    date_list = list(signal_dates)
+    if not symbol_list or not date_list:
+        return {}
+
+    db_path = default_daily_db_path(project_root)
+    if db_path.exists():
+        provider = DailySqlitePriceProvider(db_path)
+        rows = provider.load_close_lookup(symbols=symbol_list, signal_dates=date_list)
+        if rows:
+            return rows
+
+    target_dates = set(date_list)
+    lookup: dict[tuple[str, dt.date], float] = {}
+    for symbol in symbol_list:
+        try:
+            frame = _load_price_frame(str(project_root), symbol)
+        except FileNotFoundError:
+            continue
+        subset = frame[frame["date"].isin(target_dates)]
+        for _, row in subset.iterrows():
+            lookup[(symbol, row["date"])] = float(row["close"])
+    return lookup
 
 
 def compute_forward_metrics(

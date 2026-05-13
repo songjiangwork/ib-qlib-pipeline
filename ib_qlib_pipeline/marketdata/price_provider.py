@@ -3,7 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Iterable, Protocol
 
 from sqlalchemy import select
 
@@ -28,6 +28,13 @@ class PriceProvider(Protocol):
         start_date: dt.date | None = None,
         end_date: dt.date | None = None,
     ) -> list[dict[str, object]]: ...
+
+    def load_close_lookup(
+        self,
+        *,
+        symbols: Iterable[str],
+        signal_dates: Iterable[dt.date],
+    ) -> dict[tuple[str, dt.date], float]: ...
 
 
 @dataclass
@@ -93,3 +100,25 @@ class DailySqlitePriceProvider:
             }
             for trade_date, open_, high, low, close, volume in rows
         ]
+
+    def load_close_lookup(
+        self,
+        *,
+        symbols: Iterable[str],
+        signal_dates: Iterable[dt.date],
+    ) -> dict[tuple[str, dt.date], float]:
+        symbol_list = sorted({str(symbol).strip() for symbol in symbols if str(symbol).strip()})
+        date_list = sorted({date.isoformat() for date in signal_dates})
+        if not symbol_list or not date_list:
+            return {}
+        query = (
+            select(PriceDaily.symbol, PriceDaily.trade_date, PriceDaily.close)
+            .where(PriceDaily.symbol.in_(symbol_list))
+            .where(PriceDaily.trade_date.in_(date_list))
+        )
+        with self._session() as session:
+            rows = session.execute(query).all()
+        return {
+            (str(symbol), dt.date.fromisoformat(str(trade_date))): float(close)
+            for symbol, trade_date, close in rows
+        }

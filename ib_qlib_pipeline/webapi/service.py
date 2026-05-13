@@ -575,6 +575,7 @@ class RankingBackendService:
         command = self._build_refresh_data_command(
             client_id=int(payload["client_id"]),
             start_date=str(payload["start_date"]),
+            config_path=str(payload.get("config_path") or "config.yaml"),
         )
         self._run_job_step(job_id, "refresh_data", command)
 
@@ -588,6 +589,7 @@ class RankingBackendService:
             workflow_base=str(model["workflow_base"]),
             model_id=int(model["id"]),
             client_id=int(payload["client_id"]),
+            config_path=self._config_path_for_model(model),
         )
         self._run_job_step(job_id, f"backfill_{model['key']}", command)
 
@@ -605,13 +607,28 @@ class RankingBackendService:
         start_date = str(payload["start_date"])
         include_portfolio = bool(payload.get("include_portfolio", True))
 
-        self._run_job_step(
-            job_id,
-            "refresh_data",
-            self._build_refresh_data_command(client_id=client_id, start_date=start_date),
-        )
-
         models = [model for model in list_models(self.settings.db_path) if model.get("workflow_base")]
+        config_paths: list[str] = []
+        seen_config_paths: set[str] = set()
+        for model in models:
+            config_path = self._config_path_for_model(model)
+            if config_path in seen_config_paths:
+                continue
+            seen_config_paths.add(config_path)
+            config_paths.append(config_path)
+
+        for config_path in config_paths:
+            step_suffix = Path(config_path).stem
+            self._run_job_step(
+                job_id,
+                f"refresh_data_{step_suffix}",
+                self._build_refresh_data_command(
+                    client_id=client_id,
+                    start_date=start_date,
+                    config_path=config_path,
+                ),
+            )
+
         trading_days = read_available_trading_days(self.settings.project_root)
         start_bound = dt.date.fromisoformat(start_date)
         for model in models:
@@ -621,17 +638,20 @@ class RankingBackendService:
                 trading_days=trading_days,
                 fallback_start_date=start_bound,
             )
-            for signal_day in missing_days:
-                self._run_job_step(
-                    job_id,
-                    f"backfill_{model['key']}_{signal_day.isoformat()}",
-                    self._build_backfill_command(
-                        signal_date=signal_day.isoformat(),
-                        workflow_base=str(model["workflow_base"]),
-                        model_id=int(model["id"]),
-                        client_id=client_id,
-                    ),
-                )
+            if not missing_days:
+                continue
+            self._run_job_step(
+                job_id,
+                f"backfill_{model['key']}_{missing_days[0].isoformat()}_to_{missing_days[-1].isoformat()}",
+                self._build_bulk_backfill_command(
+                    start_date=missing_days[0].isoformat(),
+                    end_date=missing_days[-1].isoformat(),
+                    workflow_base=str(model["workflow_base"]),
+                    model_id=int(model["id"]),
+                    client_id=client_id,
+                    config_path=self._config_path_for_model(model),
+                ),
+            )
 
         if not include_portfolio:
             return
@@ -747,13 +767,19 @@ class RankingBackendService:
                 last_run_status="succeeded",
             )
 
-    def _build_refresh_data_command(self, *, client_id: int, start_date: str) -> list[str]:
+    def _build_refresh_data_command(
+        self,
+        *,
+        client_id: int,
+        start_date: str,
+        config_path: str = "config.yaml",
+    ) -> list[str]:
         python_bin = self.settings.project_root / ".venv" / "bin" / "python"
         return [
             str(python_bin),
             "run.py",
             "--config",
-            "config.yaml",
+            config_path,
             "--client-id",
             str(client_id),
             "--start-date",
@@ -771,11 +797,14 @@ class RankingBackendService:
         workflow_base: str,
         model_id: int,
         client_id: int,
+        config_path: str = "config.yaml",
     ) -> list[str]:
         python_bin = self.settings.project_root / ".venv" / "bin" / "python"
         return [
             str(python_bin),
             "backfill_rankings.py",
+            "--config",
+            config_path,
             "--start-date",
             signal_date,
             "--end-date",
@@ -791,6 +820,50 @@ class RankingBackendService:
             "--skip-existing-db",
             "--skip-existing-files",
         ]
+
+    def _build_bulk_backfill_command(
+        self,
+        *,
+        start_date: str,
+        end_date: str,
+        workflow_base: str,
+        model_id: int,
+        client_id: int,
+        config_path: str = "config.yaml",
+    ) -> list[str]:
+        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
+        return [
+            str(python_bin),
+            "backfill_rankings_bulk.py",
+            "--config",
+            config_path,
+            "--start-date",
+            start_date,
+            "--end-date",
+            end_date,
+            "--workflow-base",
+            workflow_base,
+            "--model-id",
+            str(model_id),
+            "--client-id",
+            str(client_id),
+            "--html-mode",
+            "cached",
+            "--skip-existing-db",
+        ]
+
+    def _config_path_for_model(self, model: dict[str, Any]) -> str:
+        universe_id = model.get("universe_id")
+        if universe_id is not None:
+            universe = get_universe_record(self.settings.db_path, int(universe_id))
+            if universe is not None:
+                details = universe.get("details") or {}
+                config_path = details.get("config_path")
+                if isinstance(config_path, str) and config_path.strip():
+                    return config_path.strip()
+        if str(model.get("universe_key") or "").strip() == "us_union_sp500_ndx_djia_sox":
+            return "config_union.yaml"
+        return "config.yaml"
 
     def _build_append_portfolio_command(
         self,

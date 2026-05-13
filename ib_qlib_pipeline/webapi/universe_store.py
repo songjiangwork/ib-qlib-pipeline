@@ -21,6 +21,7 @@ DEFAULT_UNIVERSES: list[dict[str, Any]] = [
             "family": "equity",
             "scope": "sp500",
             "status": "active",
+            "config_path": "config.yaml",
         },
     },
     {
@@ -32,6 +33,7 @@ DEFAULT_UNIVERSES: list[dict[str, Any]] = [
             "family": "equity",
             "scope": "union",
             "status": "experimental",
+            "config_path": "config_union.yaml",
         },
     },
 ]

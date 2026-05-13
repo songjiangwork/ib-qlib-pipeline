@@ -1,0 +1,31 @@
+ib:
+  host: 192.168.1.104
+  port: 4002
+  client_id: 101
+  account: DUXXXXXXX
+  trading_mode: paper
+
+data:
+  symbols_file: symbols/us_union_sp500_ndx_djia_sox.txt
+  start_date: "2016-01-01"
+  end_date: null
+  bar_size: "1 day"
+  what_to_show: "ADJUSTED_LAST"
+  use_rth: true
+  request_pause_seconds: 0.0
+  with_news: false
+  include_news_body: false
+  news_start_date: "2025-01-01"
+  max_news_results: 5
+
+output:
+  root_dir: data_union
+  raw_prices_dir: data/raw/prices
+  raw_news_dir: data_union/raw/news
+  qlib_csv_dir: data_union/processed/qlib_csv
+  qlib_bin_dir: data_union/qlib/us_data_custom
+
+qlib:
+  enabled: false
+  qlib_repo_path: /home/song/projects/qlib
+  python_bin: /home/song/projects/qlib/.venv/bin/python

@@ -70,3 +70,38 @@ def build_backfill_runtime_workflow(
     wf["experiment_name"] = experiment_name
     runtime_wf = write_runtime_workflow(runtime_cfg, f"workflow_backfill_{trade_date_str}.yaml", wf)
     return runtime_wf, experiment_name
+
+
+def build_bulk_backfill_runtime_workflow(
+    *,
+    runtime_cfg: QlibRuntimeConfig,
+    workflow_base: str,
+    model_key: str,
+    start_date: dt.date,
+    end_date: dt.date,
+    backtest_end: dt.date,
+    base_workflow: dict,
+) -> tuple[Path, str]:
+    wf = yaml.safe_load(yaml.safe_dump(base_workflow, sort_keys=False, allow_unicode=False))
+    workflow_stem = Path(workflow_base).stem.replace("workflow_", "")
+    start_date_str = start_date.isoformat()
+    end_date_str = end_date.isoformat()
+    experiment_name = build_run_token(f"bulk_backfill_{model_key}_{workflow_stem}_{start_date_str}_{end_date_str}")
+    wf.setdefault("qlib_init", {})
+    wf["qlib_init"]["provider_uri"] = str(runtime_cfg.data_dir / "qlib" / "us_data_custom")
+    wf["data_handler_config"]["end_time"] = end_date_str
+    wf["task"]["dataset"]["kwargs"]["segments"]["test"] = [start_date_str, end_date_str]
+    wf["task"]["record"] = [
+        record
+        for record in wf["task"]["record"]
+        if str(record.get("class")) != "PortAnaRecord"
+    ]
+    if "port_analysis_config" in wf and "backtest" in wf["port_analysis_config"]:
+        wf["port_analysis_config"]["backtest"]["end_time"] = backtest_end.isoformat()
+    wf["experiment_name"] = experiment_name
+    runtime_wf = write_runtime_workflow(
+        runtime_cfg,
+        f"workflow_bulk_backfill_{model_key}_{start_date_str}_{end_date_str}.yaml",
+        wf,
+    )
+    return runtime_wf, experiment_name

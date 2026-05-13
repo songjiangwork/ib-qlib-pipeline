@@ -16,6 +16,7 @@ from .universe_store import ensure_default_universes, get_universe_by_key
 
 DEFAULT_MODELS: list[dict[str, Any]] = [
     {
+        "universe_key": "sp500",
         "key": "lgb",
         "name": "LightGBM_Default",
         "model_class": "LGBModel",
@@ -28,6 +29,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         },
     },
     {
+        "universe_key": "sp500",
         "key": "xgb",
         "name": "XGBoost_Default",
         "model_class": "XGBModel",
@@ -40,6 +42,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         },
     },
     {
+        "universe_key": "sp500",
         "key": "catboost",
         "name": "CatBoost_Default",
         "model_class": "CatBoostModel",
@@ -52,6 +55,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         },
     },
     {
+        "universe_key": "sp500",
         "key": "lgb_5d",
         "name": "LightGBM_5D",
         "model_class": "LGBModel",
@@ -64,6 +68,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         },
     },
     {
+        "universe_key": "sp500",
         "key": "xgb_5d",
         "name": "XGBoost_5D",
         "model_class": "XGBModel",
@@ -76,6 +81,7 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
         },
     },
     {
+        "universe_key": "sp500",
         "key": "catboost_5d",
         "name": "CatBoost_5D",
         "model_class": "CatBoostModel",
@@ -85,6 +91,132 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "family": "gbdt",
             "variant": "next_open_5d",
             "notes": "Next-open to 5-day-close target for CatBoost",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "lgb_union",
+        "name": "LightGBM_Default_Union",
+        "model_class": "LGBModel",
+        "module_path": "qlib.contrib.model.gbdt",
+        "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "default",
+            "scope": "union",
+            "notes": "Default LightGBM model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "xgb_union",
+        "name": "XGBoost_Default_Union",
+        "model_class": "XGBModel",
+        "module_path": "qlib.contrib.model.xgboost",
+        "workflow_base": "examples/workflow_us_xgb_2020_port.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "default",
+            "scope": "union",
+            "notes": "Default XGBoost model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "catboost_union",
+        "name": "CatBoost_Default_Union",
+        "model_class": "CatBoostModel",
+        "module_path": "qlib.contrib.model.catboost_model",
+        "workflow_base": "examples/workflow_us_catboost_2020_port.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "default",
+            "scope": "union",
+            "notes": "Default CatBoost model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "lgb_5d_union",
+        "name": "LightGBM_5D_Union",
+        "model_class": "LGBModel",
+        "module_path": "qlib.contrib.model.gbdt",
+        "workflow_base": "examples/workflow_us_lgb_2020_port_next_open_5d.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "next_open_5d",
+            "scope": "union",
+            "notes": "Next-open to 5-day-close LightGBM model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "xgb_5d_union",
+        "name": "XGBoost_5D_Union",
+        "model_class": "XGBModel",
+        "module_path": "qlib.contrib.model.xgboost",
+        "workflow_base": "examples/workflow_us_xgb_2020_port_next_open_5d.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "next_open_5d",
+            "scope": "union",
+            "notes": "Next-open to 5-day-close XGBoost model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "catboost_5d_union",
+        "name": "CatBoost_5D_Union",
+        "model_class": "CatBoostModel",
+        "module_path": "qlib.contrib.model.catboost_model",
+        "workflow_base": "examples/workflow_us_catboost_2020_port_next_open_5d.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "next_open_5d",
+            "scope": "union",
+            "notes": "Next-open to 5-day-close CatBoost model family for the union universe",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "lgb5_u16",
+        "name": "LGB5_U16",
+        "model_class": "LGBModel",
+        "module_path": "qlib.contrib.model.gbdt",
+        "workflow_base": "examples/wf_lgb5_u16.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "u16_5d",
+            "scope": "union",
+            "notes": "Union 5D experiment with 2016 training start and 8 threads",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "xgb5_u16",
+        "name": "XGB5_U16",
+        "model_class": "XGBModel",
+        "module_path": "qlib.contrib.model.xgboost",
+        "workflow_base": "examples/wf_xgb5_u16.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "u16_5d",
+            "scope": "union",
+            "notes": "Union 5D experiment with 2016 training start and 8 threads",
+        },
+    },
+    {
+        "universe_key": "us_union_sp500_ndx_djia_sox",
+        "key": "cat5_u16",
+        "name": "CAT5_U16",
+        "model_class": "CatBoostModel",
+        "module_path": "qlib.contrib.model.catboost_model",
+        "workflow_base": "examples/wf_cat5_u16.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "u16_5d",
+            "scope": "union",
+            "notes": "Union 5D experiment with 2016 training start and 8 threads",
         },
     },
 ]
@@ -126,17 +258,22 @@ def ensure_default_models(db_path: Path, project_root: Path | None = None) -> No
     sp500 = get_universe_by_key(db_path, "sp500")
     if sp500 is None:
         raise RuntimeError("Default universe 'sp500' is missing")
-    sp500_universe_id = int(sp500["id"])
+    universe_id_by_key: dict[str, int] = {"sp500": int(sp500["id"])}
+    union = get_universe_by_key(db_path, "us_union_sp500_ndx_djia_sox")
+    if union is not None:
+        universe_id_by_key["us_union_sp500_ndx_djia_sox"] = int(union["id"])
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
         for model in DEFAULT_MODELS:
+            universe_key = str(model.get("universe_key") or "sp500")
+            universe_id = universe_id_by_key.get(universe_key)
             existing = session.execute(
                 select(ModelRef).where(ModelRef.key == model["key"])
             ).scalar_one_or_none()
             if existing is None:
                 session.add(
                     ModelRef(
-                        universe_id=sp500_universe_id,
+                        universe_id=universe_id,
                         key=model["key"],
                         name=model["name"],
                         model_class=model["model_class"],
@@ -149,7 +286,7 @@ def ensure_default_models(db_path: Path, project_root: Path | None = None) -> No
                 )
                 continue
             existing.name = model["name"]
-            existing.universe_id = sp500_universe_id
+            existing.universe_id = universe_id
             existing.model_class = model["model_class"]
             existing.module_path = model["module_path"]
             existing.workflow_base = model["workflow_base"]

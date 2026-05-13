@@ -69,8 +69,8 @@ def render_dl_rows(rows: list[tuple[str, object]]) -> str:
     return "".join(parts)
 
 
-def build_price_stats(project_root: Path, symbol: str) -> dict[str, object]:
-    price_path = load_qlib_runtime_config(project_root).data_dir / "processed" / "qlib_csv" / f"{symbol}.csv"
+def build_price_stats(project_root: Path, symbol: str, config_path: Path | None = None) -> dict[str, object]:
+    price_path = load_qlib_runtime_config(project_root, config_path=config_path).data_dir / "processed" / "qlib_csv" / f"{symbol}.csv"
     if not price_path.exists():
         return {}
     df = pd.read_csv(price_path, usecols=["date", "open", "high", "low", "close", "volume"])
@@ -99,17 +99,17 @@ def build_price_stats(project_root: Path, symbol: str) -> dict[str, object]:
     }
 
 
-def load_ib_config(project_root: Path) -> tuple[str, int]:
-    cfg = yaml.safe_load((project_root / "config.yaml").read_text(encoding="utf-8"))
+def load_ib_config(project_root: Path, config_path: Path | None = None) -> tuple[str, int]:
+    cfg = yaml.safe_load((config_path or (project_root / "config.yaml")).read_text(encoding="utf-8"))
     return str(cfg["ib"]["host"]), int(cfg["ib"]["port"])
 
 
-def company_meta_cache_path(project_root: Path, symbol: str) -> Path:
-    return load_qlib_runtime_config(project_root).data_dir / "raw" / "company_meta" / f"{symbol}.json"
+def company_meta_cache_path(project_root: Path, symbol: str, config_path: Path | None = None) -> Path:
+    return load_qlib_runtime_config(project_root, config_path=config_path).data_dir / "raw" / "company_meta" / f"{symbol}.json"
 
 
-def load_company_meta_cache(project_root: Path, symbol: str) -> dict[str, str]:
-    path = company_meta_cache_path(project_root, symbol)
+def load_company_meta_cache(project_root: Path, symbol: str, config_path: Path | None = None) -> dict[str, str]:
+    path = company_meta_cache_path(project_root, symbol, config_path=config_path)
     if not path.exists():
         return {}
     try:
@@ -118,8 +118,14 @@ def load_company_meta_cache(project_root: Path, symbol: str) -> dict[str, str]:
         return {}
 
 
-def fetch_topn_company_data(project_root: Path, topn: pd.DataFrame, client_id: int, console_lines: list[str]) -> list[dict]:
-    host, port = load_ib_config(project_root)
+def fetch_topn_company_data(
+    project_root: Path,
+    topn: pd.DataFrame,
+    client_id: int,
+    console_lines: list[str],
+    config_path: Path | None = None,
+) -> list[dict]:
+    host, port = load_ib_config(project_root, config_path=config_path)
     ib = IB()
     rows: list[dict] = []
     try:
@@ -137,9 +143,9 @@ def fetch_topn_company_data(project_root: Path, topn: pd.DataFrame, client_id: i
                 "percentile": float(row.percentile),
                 "close": None if pd.isna(row.close) else float(row.close),
                 "metadata": {},
-                "price_stats": build_price_stats(project_root, symbol),
+                "price_stats": build_price_stats(project_root, symbol, config_path=config_path),
             }
-            cached = load_company_meta_cache(project_root, symbol)
+            cached = load_company_meta_cache(project_root, symbol, config_path=config_path)
             if cached:
                 card["metadata"] = {
                     "company_name": cached.get("longName", "") or symbol,
@@ -180,7 +186,7 @@ def fetch_topn_company_data(project_root: Path, topn: pd.DataFrame, client_id: i
     except Exception as exc:  # noqa: BLE001
         log(f"[warn] html enrichment skipped: {exc}", console_lines)
         for row in topn.itertuples(index=False):
-            cached = load_company_meta_cache(project_root, str(row.symbol))
+            cached = load_company_meta_cache(project_root, str(row.symbol), config_path=config_path)
             rows.append(
                 {
                     "rank": int(row.rank),
@@ -199,7 +205,7 @@ def fetch_topn_company_data(project_root: Path, topn: pd.DataFrame, client_id: i
                         "description": cached.get("description", "") or "N/A",
                         "pe": cached.get("pe", "") or "N/A",
                     },
-                    "price_stats": build_price_stats(project_root, str(row.symbol)),
+                    "price_stats": build_price_stats(project_root, str(row.symbol), config_path=config_path),
                 }
             )
     finally:
@@ -208,12 +214,18 @@ def fetch_topn_company_data(project_root: Path, topn: pd.DataFrame, client_id: i
     return rows
 
 
-def cached_topn_details(project_root: Path, ranking_df: pd.DataFrame, client_id: int, console_lines: list[str]) -> list[dict]:
+def cached_topn_details(
+    project_root: Path,
+    ranking_df: pd.DataFrame,
+    client_id: int,
+    console_lines: list[str],
+    config_path: Path | None = None,
+) -> list[dict]:
     rows: list[dict] = []
     log(f"[info] building cached html data for top{TOP_N} without live IB calls", console_lines)
     for row in ranking_df.head(TOP_N).itertuples(index=False):
         symbol = str(row.symbol)
-        cached = load_company_meta_cache(project_root, symbol)
+        cached = load_company_meta_cache(project_root, symbol, config_path=config_path)
         rows.append(
             {
                 "rank": int(row.rank),
@@ -232,7 +244,7 @@ def cached_topn_details(project_root: Path, ranking_df: pd.DataFrame, client_id:
                     "description": cached.get("description", "") or "N/A",
                     "pe": cached.get("pe", "") or "N/A",
                 },
-                "price_stats": build_price_stats(project_root, symbol),
+                "price_stats": build_price_stats(project_root, symbol, config_path=config_path),
             }
         )
     return rows

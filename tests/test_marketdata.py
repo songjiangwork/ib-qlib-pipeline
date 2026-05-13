@@ -18,7 +18,7 @@ from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.strategy_store import ensure_default_strategies
 from ib_qlib_pipeline.webapi.universe_store import ensure_default_universes
-from ib_qlib_pipeline.webapi.price_store import list_price_bars, list_price_history
+from ib_qlib_pipeline.webapi.price_store import list_price_bars, list_price_history, load_close_lookup
 
 
 class MarketDataTestCase(unittest.TestCase):
@@ -98,6 +98,16 @@ class MarketDataTestCase(unittest.TestCase):
         self.assertEqual(2, len(history))
         self.assertEqual(2, len(bars))
         self.assertEqual(11.5, bars[1]["close"])
+
+    def test_load_close_lookup_prefers_provider(self) -> None:
+        import_daily_csv_file(self.db_path, self.csv_path, symbol="TEST")
+        lookup = load_close_lookup(
+            self.project_root,
+            symbols=["TEST"],
+            signal_dates=[dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+        )
+        self.assertEqual(10.5, lookup[("TEST", dt.date(2026, 5, 5))])
+        self.assertEqual(11.5, lookup[("TEST", dt.date(2026, 5, 6))])
 
     def test_daily_price_store_import_directory(self) -> None:
         store = DailyPriceStore(self.project_root)

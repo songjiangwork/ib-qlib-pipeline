@@ -7,28 +7,22 @@ import sys
 from pathlib import Path
 
 import pandas as pd
-import yaml
 
 from ib_qlib_pipeline.qlib_runtime import load_qlib_runtime_config
 from ib_qlib_pipeline.ranking import TOP_N
 from ib_qlib_pipeline.ranking.ranking_loader import (
-    load_ranking_dataframe,
+    build_ranking_for_signal_date,
     read_available_trading_days,
+    read_prediction_dataframe,
 )
-from ib_qlib_pipeline.reporting.company_enricher import (
-    cached_topn_details,
-    fetch_topn_company_data,
-)
+from ib_qlib_pipeline.reporting.company_enricher import cached_topn_details, fetch_topn_company_data
 from ib_qlib_pipeline.reporting.html_report import build_html_report
 from ib_qlib_pipeline.runner.common import log
 from ib_qlib_pipeline.runner.qlib_runner import run_qlib_workflow
-from ib_qlib_pipeline.runner.runtime_workflow import build_backfill_runtime_workflow, load_base_workflow
+from ib_qlib_pipeline.runner.runtime_workflow import build_bulk_backfill_runtime_workflow, load_base_workflow
 from ib_qlib_pipeline.webapi.db import init_db
-from ib_qlib_pipeline.webapi.model_store import (
-    ensure_default_models,
-    get_model,
-    resolve_or_create_model_for_workflow,
-)
+from ib_qlib_pipeline.webapi.model_store import ensure_default_models, get_model, resolve_or_create_model_for_workflow
+from ib_qlib_pipeline.webapi.price_store import load_close_lookup
 from ib_qlib_pipeline.webapi.run_store import insert_completed_run
 from ib_qlib_pipeline.webapi.settings import Settings
 
@@ -39,7 +33,7 @@ def status(message: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Backfill daily ranking CSV/HTML outputs and insert historical runs into SQLite.",
+        description="Bulk backfill historical rankings using one qrun per date range and per-date exports.",
     )
     parser.add_argument("--start-date", default="2025-01-01", help="Backfill start date in YYYY-MM-DD format")
     parser.add_argument("--end-date", default=None, help="Backfill end date in YYYY-MM-DD format; defaults to latest trading date")
@@ -60,9 +54,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def existing_signal_dates(db_path: Path, model_id: int) -> set[str]:
-    init_db(db_path)
     import sqlite3
 
+    init_db(db_path)
     conn = sqlite3.connect(str(db_path))
     try:
         rows = conn.execute(
@@ -123,82 +117,110 @@ def main() -> None:
         raise SystemExit(f"Model id not found: {model_id}")
     known_dates = existing_signal_dates(settings.db_path, model_id) if args.skip_existing_db else set()
 
-    status(
-        f"[info] backfill range: {selected_days[0]} -> {selected_days[-1]} ({len(selected_days)} trading days)"
-    )
-    status(
-        f"[info] model_id={model_id} model={model['name']} class={model['model_class']} workflow={args.workflow_base}"
-    )
-    for index, trade_date in enumerate(selected_days, start=1):
+    pending_days: list[dt.date] = []
+    for trade_date in selected_days:
         trade_date_str = trade_date.isoformat()
         csv_path = backfill_csv_path(project_root, str(model["key"]), trade_date)
-        html_path = backfill_html_path(project_root, str(model["key"]), trade_date)
-
         if args.skip_existing_db and trade_date_str in known_dates:
             status(f"[skip] {trade_date_str} already exists in DB")
             continue
         if args.skip_existing_files and csv_path.exists():
             status(f"[skip] {trade_date_str} CSV already exists")
             continue
+        pending_days.append(trade_date)
 
-        console_lines: list[str] = []
-        log(f"[info] [{index}/{len(selected_days)}] backfilling {trade_date_str}", console_lines)
+    if not pending_days:
+        status("[ok] nothing to backfill after skip filters")
+        return
 
-        backtest_end = trade_date
-        prior_days = [day for day in trading_days if day < trade_date]
-        if prior_days:
-            backtest_end = prior_days[-1]
-        runtime_wf, experiment_name = build_backfill_runtime_workflow(
-            runtime_cfg=runtime_cfg,
-            workflow_base=args.workflow_base,
-            model_key=str(model["key"]),
-            trade_date=trade_date,
-            backtest_end=backtest_end,
-            base_workflow=base_workflow,
+    bulk_start = min(pending_days)
+    bulk_end = max(pending_days)
+    prior_days = [day for day in trading_days if day < bulk_end]
+    backtest_end = prior_days[-1] if prior_days else bulk_end
+
+    console_lines: list[str] = []
+    log(
+        f"[info] bulk backfill range: {bulk_start.isoformat()} -> {bulk_end.isoformat()} "
+        f"({len(pending_days)} selected trading days, {len(selected_days)} requested)",
+        console_lines,
+    )
+    log(
+        f"[info] model_id={model_id} model={model['name']} class={model['model_class']} workflow={args.workflow_base}",
+        console_lines,
+    )
+
+    runtime_wf, experiment_name = build_bulk_backfill_runtime_workflow(
+        runtime_cfg=runtime_cfg,
+        workflow_base=args.workflow_base,
+        model_key=str(model["key"]),
+        start_date=bulk_start,
+        end_date=bulk_end,
+        backtest_end=backtest_end,
+        base_workflow=base_workflow,
+    )
+    log(f"[ok] bulk runtime workflow: {runtime_wf}", console_lines)
+    log(f"[ok] bulk window={bulk_start.isoformat()}..{bulk_end.isoformat()} backtest_end={backtest_end.isoformat()}", console_lines)
+    log("[ok] bulk backfill mode disabled PortAnaRecord for faster, benchmark-free replay", console_lines)
+    log(f"[ok] experiment_name={experiment_name}", console_lines)
+
+    pred_path, exp_id, rec_id = run_qlib_workflow(
+        runtime_cfg=runtime_cfg,
+        runtime_workflow_path=runtime_wf,
+        experiment_name=experiment_name,
+        cwd=project_root,
+        console_lines=console_lines,
+    )
+    log(f"[ok] pred={pred_path}", console_lines)
+    log(f"[ok] experiment_id={exp_id} recorder_id={rec_id}", console_lines)
+
+    pred_df = read_prediction_dataframe(pred_path)
+    log(f"[ok] prediction rows loaded={len(pred_df)} dates={pred_df['signal_datetime'].dt.date.nunique()}", console_lines)
+    symbols = pred_df["symbol"].dropna().astype(str).unique().tolist()
+    close_cache = load_close_lookup(project_root, symbols=symbols, signal_dates=pending_days)
+    log(f"[ok] close cache loaded entries={len(close_cache)} symbols={len(symbols)} dates={len(pending_days)}", console_lines)
+
+    for index, trade_date in enumerate(pending_days, start=1):
+        trade_date_str = trade_date.isoformat()
+        csv_path = backfill_csv_path(project_root, str(model["key"]), trade_date)
+        html_path = backfill_html_path(project_root, str(model["key"]), trade_date)
+
+        day_console_lines = list(console_lines)
+        log(f"[info] [{index}/{len(pending_days)}] exporting {trade_date_str}", day_console_lines)
+        ranking_df = build_ranking_for_signal_date(
+            pred_df=pred_df,
+            signal_date=trade_date,
+            exp_id=exp_id,
+            rec_id=rec_id,
+            close_lookup=close_cache,
         )
-        log(f"[ok] runtime workflow: {runtime_wf}", console_lines)
-        log(f"[ok] target_trade_date={trade_date_str} backtest_end={backtest_end.isoformat()}", console_lines)
-        log("[ok] backfill mode disabled PortAnaRecord for faster, benchmark-free replay", console_lines)
-        log(f"[ok] experiment_name={experiment_name}", console_lines)
-
-        pred_path, exp_id, rec_id = run_qlib_workflow(
-            runtime_cfg=runtime_cfg,
-            runtime_workflow_path=runtime_wf,
-            experiment_name=experiment_name,
-            cwd=project_root,
-            console_lines=console_lines,
-        )
-        log(f"[ok] pred={pred_path}", console_lines)
-        log(f"[ok] experiment_id={exp_id} recorder_id={rec_id}", console_lines)
-
-        ranking_df = load_ranking_dataframe(project_root, pred_path, exp_id, rec_id, config_path=config_path)
         ranking_df["run_date"] = pd.to_datetime(trade_date)
         ranking_df["signal_date"] = pd.to_datetime(trade_date)
         ranking_df.to_csv(csv_path, index=False)
-        log(f"[ok] ranking exported: {csv_path}", console_lines)
+        log(f"[ok] ranking exported: {csv_path}", day_console_lines)
         log(
             f"[ok] signal_date={trade_date_str} rows={len(ranking_df)} missing_close={int(ranking_df['close'].isna().sum())}",
-            console_lines,
+            day_console_lines,
         )
 
         topn_details = (
-            fetch_topn_company_data(project_root, ranking_df.head(TOP_N), args.client_id, console_lines, config_path=config_path)
+            fetch_topn_company_data(project_root, ranking_df.head(TOP_N), args.client_id, day_console_lines, config_path=config_path)
             if args.html_mode == "ib"
-            else cached_topn_details(project_root, ranking_df, args.client_id, console_lines, config_path=config_path)
+            else cached_topn_details(project_root, ranking_df, args.client_id, day_console_lines, config_path=config_path)
         )
-        build_html_report(ranking_df, topn_details, html_path, console_lines)
-        log(f"[ok] html report exported: {html_path}", console_lines)
+        build_html_report(ranking_df, topn_details, html_path, day_console_lines)
+        log(f"[ok] html report exported: {html_path}", day_console_lines)
 
         timestamp = dt.datetime.combine(trade_date, dt.time(16, 0, tzinfo=dt.timezone.utc)).isoformat()
         run_id = insert_completed_run(
             db_path=settings.db_path,
             model_id=model_id,
-            trigger_source="backfill",
+            trigger_source="bulk_backfill",
             client_id=args.client_id,
             lookback_days=0,
             workflow_base=args.workflow_base,
             command=(
-                f"python backfill_rankings.py --start-date {trade_date_str} --end-date {trade_date_str} "
+                f"python backfill_rankings_bulk.py --config {args.config} "
+                f"--start-date {bulk_start.isoformat()} --end-date {bulk_end.isoformat()} "
                 f"--workflow-base {args.workflow_base} --model-id {model_id}"
             ),
             ranking_df=ranking_df,
@@ -206,7 +228,7 @@ def main() -> None:
             html_report_path=html_path,
             experiment_id=exp_id,
             recorder_id=rec_id,
-            log_output="\n".join(console_lines),
+            log_output="\n".join(day_console_lines),
             created_at=timestamp,
             started_at=timestamp,
             finished_at=timestamp,

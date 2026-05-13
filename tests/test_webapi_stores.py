@@ -240,9 +240,21 @@ class StoreTestCase(unittest.TestCase):
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)
-        self.assertEqual(6, len(models))
+        self.assertEqual(15, len(models))
         self.assertEqual("LightGBM_Default", get_model_by_key(self.db_path, "lgb")["name"])
         self.assertEqual("XGBoost_5D", get_model_by_key(self.db_path, "xgb_5d")["name"])
+        self.assertEqual(
+            "US Union 524",
+            get_model_by_key(self.db_path, "lgb_union")["universe_name"],
+        )
+        self.assertEqual(
+            "CatBoost_5D_Union",
+            get_model_by_key(self.db_path, "catboost_5d_union")["name"],
+        )
+        self.assertEqual(
+            "US Union 524",
+            get_model_by_key(self.db_path, "xgb5_u16")["universe_name"],
+        )
 
         model_id = resolve_or_create_model_for_workflow(
             self.db_path,
@@ -901,6 +913,13 @@ class StoreTestCase(unittest.TestCase):
             model_id=2,
             client_id=151,
         )
+        bulk_backfill = service._build_bulk_backfill_command(
+            start_date="2026-05-01",
+            end_date="2026-05-06",
+            workflow_base="examples/workflow_us_xgb_2020_port.yaml",
+            model_id=2,
+            client_id=151,
+        )
         append = service._build_append_portfolio_command(
             portfolio_run_id=42,
             model_id=3,
@@ -908,10 +927,15 @@ class StoreTestCase(unittest.TestCase):
         )
 
         self.assertEqual("run.py", refresh[1])
+        self.assertIn("config.yaml", refresh)
         self.assertIn("--dump-bin", refresh)
         self.assertEqual("backfill_rankings.py", backfill[1])
+        self.assertIn("config.yaml", backfill)
         self.assertIn("--skip-existing-db", backfill)
         self.assertIn("--model-id", backfill)
+        self.assertEqual("backfill_rankings_bulk.py", bulk_backfill[1])
+        self.assertIn("--skip-existing-db", bulk_backfill)
+        self.assertNotIn("--skip-existing-files", bulk_backfill)
         self.assertEqual("simulate_portfolio.py", append[1])
         self.assertEqual(["--append-run-id", "42"], append[2:4])
         self.assertTrue(append[-2:] == ["--model-id", "3"])
@@ -1032,6 +1056,8 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(portfolio_run_id, latest_portfolio["id"])
 
     def test_service_list_ranking_dates_filters_and_pagination(self) -> None:
+        import sqlite3
+
         service = self._make_service()
         self._insert_completed_run(signal_date="2026-05-05", model_id=1)
         self._insert_completed_run(signal_date="2026-05-06", model_id=1)
@@ -1048,6 +1074,18 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(1, paged["next_offset"])
         self.assertEqual(1, queried["total"])
         self.assertEqual("2026-05-05", queried["items"][0]["signal_date"])
+
+        bulk_run_id = self._insert_completed_run(signal_date="2026-05-07", model_id=1)
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute("update runs set trigger_source = ? where id = ?", ("bulk_backfill", bulk_run_id))
+            conn.commit()
+        finally:
+            conn.close()
+
+        with_bulk = service.list_ranking_dates(limit=10, offset=0, model_id=1)
+        self.assertEqual(3, with_bulk["total"])
+        self.assertEqual("2026-05-07", with_bulk["items"][0]["signal_date"])
 
     def test_service_trigger_methods_build_expected_jobs(self) -> None:
         service = self._make_service()
@@ -1235,8 +1273,8 @@ class StoreTestCase(unittest.TestCase):
     def test_service_execute_daily_close_pipeline_job_orchestrates_models(self) -> None:
         service = self._make_service()
         models = [
-            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"},
-            {"id": 2, "key": "xgb", "name": "XGBoost_Default", "workflow_base": "examples/workflow_us_xgb_2020_port.yaml"},
+            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml", "universe_id": 1, "universe_key": "sp500"},
+            {"id": 2, "key": "xgb_union", "name": "XGBoost_Default_Union", "workflow_base": "examples/workflow_us_xgb_2020_port.yaml", "universe_id": 2, "universe_key": "us_union_sp500_ndx_djia_sox"},
         ]
         payload = {
             "trade_date": "2026-05-06",
@@ -1258,21 +1296,21 @@ class StoreTestCase(unittest.TestCase):
         called_steps = [call.args[1] for call in run_job_step.call_args_list]
         self.assertEqual(
             [
-                "refresh_data",
-                "backfill_lgb_2026-05-05",
-                "backfill_xgb_2026-05-05",
-                "backfill_xgb_2026-05-06",
+                "refresh_data_config",
+                "refresh_data_config_union",
+                "backfill_lgb_2026-05-05_to_2026-05-05",
+                "backfill_xgb_union_2026-05-05_to_2026-05-06",
                 "append_lgb_portfolio",
             ],
             called_steps,
         )
         record_note.assert_called_once()
-        self.assertIn("append_xgb_portfolio", record_note.call_args.kwargs["step_name"])
+        self.assertIn("append_xgb_union_portfolio", record_note.call_args.kwargs["step_name"])
 
     def test_service_execute_daily_close_pipeline_job_skips_portfolio_when_disabled(self) -> None:
         service = self._make_service()
         models = [
-            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"},
+            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml", "universe_id": 1, "universe_key": "sp500"},
         ]
         payload = {
             "trade_date": "2026-05-06",
@@ -1291,8 +1329,17 @@ class StoreTestCase(unittest.TestCase):
             service._execute_daily_close_pipeline_job(902, payload)
 
         called_steps = [call.args[1] for call in run_job_step.call_args_list]
-        self.assertEqual(["refresh_data", "backfill_lgb_2026-05-06"], called_steps)
+        self.assertEqual(["refresh_data_config", "backfill_lgb_2026-05-06_to_2026-05-06"], called_steps)
         latest_portfolio.assert_not_called()
+
+    def test_service_config_path_for_model_uses_universe_details(self) -> None:
+        service = self._make_service()
+        union_model = get_model_by_key(self.db_path, "lgb_union")
+        self.assertIsNotNone(union_model)
+        self.assertEqual("config_union.yaml", service._config_path_for_model(union_model))
+        sp500_model = get_model_by_key(self.db_path, "lgb")
+        self.assertIsNotNone(sp500_model)
+        self.assertEqual("config.yaml", service._config_path_for_model(sp500_model))
 
 
 if __name__ == "__main__":

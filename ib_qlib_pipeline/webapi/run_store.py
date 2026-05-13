@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..dborm.models import ModelRef, Recommendation, Run, Schedule, Universe
 from ..dborm.session import create_session_factory_for_path
@@ -380,6 +380,7 @@ def list_ranking_dates(
     session_factory = create_session_factory_for_path(db_path)
     session = session_factory()
     try:
+        ranking_sources = ("backfill", "bulk_backfill")
         base_query = (
             select(
                 Run.id.label("run_id"),
@@ -395,9 +396,9 @@ def list_ranking_dates(
             .select_from(Run)
             .outerjoin(ModelRef, ModelRef.id == Run.model_id)
             .outerjoin(Universe, Universe.id == Run.universe_id)
-            .where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))
+            .where(Run.trigger_source.in_(ranking_sources), Run.signal_date.is_not(None))
         )
-        count_query = select(Run.id).where(Run.trigger_source == "backfill", Run.signal_date.is_not(None))
+        count_query = select(Run.id).where(Run.trigger_source.in_(ranking_sources), Run.signal_date.is_not(None))
         if query:
             like_value = f"%{query}%"
             base_query = base_query.where(Run.signal_date.like(like_value))
@@ -426,11 +427,12 @@ def latest_backfill_signal_date_for_model(db_path: Path, model_id: int) -> dt.da
     session_factory = create_session_factory_for_path(db_path)
     session = session_factory()
     try:
+        ranking_sources = ("backfill", "bulk_backfill")
         latest_signal = session.execute(
             select(Run.signal_date)
             .where(
                 Run.status == "succeeded",
-                Run.trigger_source == "backfill",
+                Run.trigger_source.in_(ranking_sources),
                 Run.model_id == model_id,
                 Run.signal_date.is_not(None),
             )

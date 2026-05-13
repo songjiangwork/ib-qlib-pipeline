@@ -13,6 +13,7 @@ import pandas as pd
 from ib_qlib_pipeline.marketdata.daily_db import default_daily_db_path
 from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
 from ib_qlib_pipeline.webapi.db import init_db
+from ib_qlib_pipeline.webapi.model_store import get_model
 from ib_qlib_pipeline.webapi.portfolio_store import (
     OpenLot,
     close_portfolio_lot,
@@ -327,6 +328,7 @@ def simulate() -> None:
             args.name
             or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
         )
+        model = get_model(settings.db_path, int(args.model_id)) if args.model_id is not None else None
         strategy_runtime = resolve_strategy_runtime(
             db_path=settings.db_path,
             run_name=run_name,
@@ -346,6 +348,7 @@ def simulate() -> None:
             target_notional=strategy_runtime.target_notional,
             start_signal_date=args.start_date,
             end_signal_date=end_date.isoformat(),
+            universe_id=int(model["universe_id"]) if model is not None and model.get("universe_id") is not None else None,
             notes=args.notes,
         )
         open_lots = {}
