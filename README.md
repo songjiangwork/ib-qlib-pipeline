@@ -231,7 +231,7 @@ cp examples/config.example.yaml config.yaml
 当前仓库已经预留：
 
 - `config_cn.yaml`
-- `symbols/cn_a_share.txt`
+- `symbols/cn/cn_a_share.txt`
 - 默认 universe: `cn_a_share`
 
 但这条线默认按“外部日线 CSV -> materialize -> qlib”接入，不直接复用当前 IB / 美股抓取脚本。

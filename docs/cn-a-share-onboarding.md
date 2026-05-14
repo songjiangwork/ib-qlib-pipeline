@@ -6,8 +6,12 @@
 
 - `config_cn.yaml`
 - 默认 universe: `cn_a_share`
-- symbol 占位文件: `symbols/cn_a_share.txt`
+- symbol 占位文件: `symbols/cn/cn_a_share.txt`
 - 训练 runtime 已不再硬编码 `us_data_custom`
+- BaoStock / CSI800 脚本：
+  - `scripts/generate_csi800_symbols.py`
+  - `scripts/download_cn_csi800_daily_baostock.py`
+  - `scripts/export_cn_daily_to_qlib_csv.py`
 
 ## 你需要提供的内容
 
@@ -19,26 +23,63 @@
 
 2. 日线 CSV
    - 放到：
-     - `data_cn/raw/prices/<SYMBOL>.csv`
+     - `data/cn/raw/baostock/daily/<SYMBOL>.csv`
    - 列格式需要与当前 raw price CSV 保持一致：
      - `date,symbol,open,high,low,close,volume,factor`
 
 ## 典型接入流程
 
-1. 填写 `symbols/cn_a_share.txt`
-2. 将外部 A 股日线整理成 raw CSV，写入 `data_cn/raw/prices`
-3. 物化 qlib CSV / qlib bin：
+1. 生成或手工提供 CSI300 / CSI500 / CSI800 symbols
 
 ```bash
-python -m ib_qlib_pipeline.materialize_universe_data \
-  --config config_cn.yaml \
-  --dump-bin
+python scripts/generate_csi800_symbols.py
 ```
 
-4. 再为 A 股新建 workflow / model family
-5. 然后跑：
+2. 下载 BaoStock 原始日线
+
+```bash
+python scripts/download_cn_csi800_daily_baostock.py \
+  --symbols symbols/cn/csi800_baostock_map.txt \
+  --start-date 2016-01-01
+```
+
+3. 导出 Qlib CSV
+
+```bash
+python scripts/export_cn_daily_to_qlib_csv.py \
+  --raw-dir data/cn/raw/baostock/daily \
+  --out-dir data/cn/processed/qlib_csv \
+  --start-date 2016-01-01 \
+  --drop-suspended \
+  --drop-zero-volume
+```
+
+4. 生成 qlib bin：
+
+```bash
+python /home/song/projects/qlib/scripts/dump_bin.py dump_all \
+  --csv_path data/cn/processed/qlib_csv \
+  --qlib_dir data/qlib/cn_csi800 \
+  --freq day \
+  --date_field_name date \
+  --symbol_field_name symbol \
+  --include_fields open,close,high,low,volume,factor
+```
+
+5. 再为 A 股新建 workflow / model family
+6. 然后跑：
    - `backfill_rankings_bulk.py`
    - `simulate_portfolio.py`
+
+## 目录约定
+
+当前 A 股按 `data/<market>/...` 方案组织：
+
+- `data/cn/raw/baostock/daily`
+- `data/cn/processed/qlib_csv`
+- `data/qlib/cn_csi800`
+
+美股历史目录目前仍保留原状，后续如需统一到 `data/us/...`，再单独迁移。
 
 ## 当前限制
 

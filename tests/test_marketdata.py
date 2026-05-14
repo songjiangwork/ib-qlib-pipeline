@@ -27,10 +27,11 @@ class MarketDataTestCase(unittest.TestCase):
         self.project_root = Path(self._tmp.name)
         (self.project_root / "data" / "processed" / "qlib_csv").mkdir(parents=True, exist_ok=True)
         (self.project_root / "symbols").mkdir(parents=True, exist_ok=True)
+        (self.project_root / "symbols" / "cn").mkdir(parents=True, exist_ok=True)
         self.csv_path = self.project_root / "data" / "processed" / "qlib_csv" / "TEST.csv"
         self.project_root.joinpath("symbols", "sp500_full_ib_map.txt").write_text("TEST,TEST\n", encoding="utf-8")
         self.project_root.joinpath("symbols", "us_union_sp500_ndx_djia_sox.txt").write_text("TEST,TEST\n", encoding="utf-8")
-        self.project_root.joinpath("symbols", "cn_a_share.txt").write_text("", encoding="utf-8")
+        self.project_root.joinpath("symbols", "cn", "cn_a_share.txt").write_text("", encoding="utf-8")
         self.csv_path.write_text(
             "\n".join(
                 [

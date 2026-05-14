@@ -1,0 +1,12 @@
+# Placeholder CN A-share universe.
+# Replace these comments with your actual symbol list before training.
+#
+# Recommended formats:
+# SH600519
+# SZ000001
+# SZ300750
+#
+# Alternative accepted inputs for helper scripts:
+# 600519
+# 000001
+# sz.300750

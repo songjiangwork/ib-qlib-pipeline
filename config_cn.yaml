@@ -6,7 +6,7 @@ ib:
   trading_mode: paper
 
 data:
-  symbols_file: symbols/cn_a_share.txt
+  symbols_file: symbols/cn/cn_a_share.txt
   start_date: "2016-01-01"
   end_date: null
   bar_size: "1 day"
@@ -19,11 +19,11 @@ data:
   max_news_results: 0
 
 output:
-  root_dir: data_cn
-  raw_prices_dir: data_cn/raw/prices
-  raw_news_dir: data_cn/raw/news
-  qlib_csv_dir: data_cn/processed/qlib_csv
-  qlib_bin_dir: data_cn/qlib/cn_data_custom
+  root_dir: data/cn
+  raw_prices_dir: data/cn/raw/baostock/daily
+  raw_news_dir: data/cn/raw/news
+  qlib_csv_dir: data/cn/processed/qlib_csv
+  qlib_bin_dir: data/qlib/cn_csi800
 
 qlib:
   enabled: false

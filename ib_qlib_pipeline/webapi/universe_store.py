@@ -39,7 +39,7 @@ DEFAULT_UNIVERSES: list[dict[str, Any]] = [
     {
         "key": "cn_a_share",
         "name": "CN A-Share",
-        "symbols_file": "symbols/cn_a_share.txt",
+        "symbols_file": "symbols/cn/cn_a_share.txt",
         "description": "Placeholder universe for future China A-share daily-data experiments",
         "details": {
             "family": "equity",

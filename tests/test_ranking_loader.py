@@ -108,7 +108,7 @@ class RankingLoaderTestCase(unittest.TestCase):
                     "  account: TEST",
                     "  trading_mode: paper",
                     "data:",
-                    "  symbols_file: symbols/cn_a_share.txt",
+                    "  symbols_file: symbols/cn/cn_a_share.txt",
                     "  start_date: \"2016-01-01\"",
                     "  end_date: null",
                     "  bar_size: \"1 day\"",
