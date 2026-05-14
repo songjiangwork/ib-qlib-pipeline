@@ -148,13 +148,15 @@ class StoreTestCase(unittest.TestCase):
 
     def test_universe_store_defaults_and_model_binding(self) -> None:
         universes = list_universes(self.db_path)
-        self.assertEqual(3, len(universes))
+        self.assertEqual(4, len(universes))
         self.assertEqual("sp500", universes[0]["key"])
         self.assertEqual(503, universes[0]["symbol_count"])
         self.assertEqual("us_union_sp500_ndx_djia_sox", universes[1]["key"])
         self.assertEqual(524, universes[1]["symbol_count"])
         self.assertEqual("cn_a_share", universes[2]["key"])
         self.assertEqual(0, universes[2]["symbol_count"])
+        self.assertEqual("cn_csi800", universes[3]["key"])
+        self.assertEqual(800, universes[3]["symbol_count"])
 
         sp500 = get_universe_by_key(self.db_path, "sp500")
         model = get_model_by_key(self.db_path, "lgb")
@@ -222,7 +224,7 @@ class StoreTestCase(unittest.TestCase):
         list_symbols_endpoint = route_map[("/api/universes/{universe_id}/symbols", ("GET",))]
 
         listed = list_endpoint()
-        self.assertEqual(3, len(listed))
+        self.assertEqual(4, len(listed))
 
         created_body = create_endpoint(
             UniverseCreate(
@@ -247,7 +249,7 @@ class StoreTestCase(unittest.TestCase):
 
     def test_model_store_default_models_and_lookup(self) -> None:
         models = list_models(self.db_path)
-        self.assertEqual(16, len(models))
+        self.assertEqual(19, len(models))
         self.assertEqual("LightGBM_Default", get_model_by_key(self.db_path, "lgb")["name"])
         self.assertEqual("XGBoost_5D", get_model_by_key(self.db_path, "xgb_5d")["name"])
         self.assertEqual(
@@ -258,6 +260,9 @@ class StoreTestCase(unittest.TestCase):
             "CatBoost_5D_Union",
             get_model_by_key(self.db_path, "catboost_5d_union")["name"],
         )
+        cn_model = get_model_by_key(self.db_path, "cat_cn1")
+        cn_universe = get_universe_by_key(self.db_path, "cn_csi800")
+        self.assertEqual(cn_universe["id"], cn_model["universe_id"])
         self.assertEqual("CAT1_U16", get_model_by_key(self.db_path, "cat1_u16")["name"])
         self.assertEqual(
             "US Union 524",

@@ -4,6 +4,9 @@ __pycache__/
 data/
 data/app/
 data_cn/
+symbols/cn/downloads/
+symbols/cn/csi800_metadata.csv
+symbols/cn/failed_symbols.txt
 config.yaml
 mlruns/
 catboost_info/

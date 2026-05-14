@@ -5,6 +5,7 @@ import sqlite3
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import simulate_portfolio
 from ib_qlib_pipeline.marketdata.daily_db import (
@@ -32,6 +33,21 @@ class MarketDataTestCase(unittest.TestCase):
         self.project_root.joinpath("symbols", "sp500_full_ib_map.txt").write_text("TEST,TEST\n", encoding="utf-8")
         self.project_root.joinpath("symbols", "us_union_sp500_ndx_djia_sox.txt").write_text("TEST,TEST\n", encoding="utf-8")
         self.project_root.joinpath("symbols", "cn", "cn_a_share.txt").write_text("", encoding="utf-8")
+        self.project_root.joinpath("symbols", "cn", "csi800_qlib.txt").write_text("TEST\n", encoding="utf-8")
+        self.project_root.joinpath("config.yaml").write_text(
+            "\n".join(
+                [
+                    "output:",
+                    "  root_dir: data",
+                    "  qlib_csv_dir: data/processed/qlib_csv",
+                    "  qlib_bin_dir: data/qlib/us_data_custom",
+                    "qlib:",
+                    "  qlib_repo_path: /tmp/qlib",
+                    "  python_bin: /tmp/qlib/.venv/bin/python",
+                ]
+            ),
+            encoding="utf-8",
+        )
         self.csv_path.write_text(
             "\n".join(
                 [
@@ -110,6 +126,28 @@ class MarketDataTestCase(unittest.TestCase):
         )
         self.assertEqual(10.5, lookup[("TEST", dt.date(2026, 5, 5))])
         self.assertEqual(11.5, lookup[("TEST", dt.date(2026, 5, 6))])
+
+    def test_load_close_lookup_uses_custom_qlib_csv_dir(self) -> None:
+        cn_dir = self.project_root / "data" / "cn" / "processed" / "qlib_csv"
+        cn_dir.mkdir(parents=True, exist_ok=True)
+        (cn_dir / "CNTEST.csv").write_text(
+            "\n".join(
+                [
+                    "symbol,date,open,high,low,close,volume,factor",
+                    "CNTEST,2026-05-05,21,22,20,21.5,1000,1",
+                    "CNTEST,2026-05-06,22,23,21,22.5,1200,1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        lookup = load_close_lookup(
+            self.project_root,
+            symbols=["CNTEST"],
+            signal_dates=[dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+            qlib_csv_dir=cn_dir,
+        )
+        self.assertEqual(21.5, lookup[("CNTEST", dt.date(2026, 5, 5))])
+        self.assertEqual(22.5, lookup[("CNTEST", dt.date(2026, 5, 6))])
 
     def test_daily_price_store_import_directory(self) -> None:
         store = DailyPriceStore(self.project_root)
@@ -209,3 +247,42 @@ class MarketDataTestCase(unittest.TestCase):
             runtime,
         )
         self.assertTrue(blocked)
+
+    def test_simulate_portfolio_uses_config_specific_qlib_csv_dir(self) -> None:
+        cn_dir = self.project_root / "data" / "cn" / "processed" / "qlib_csv"
+        cn_dir.mkdir(parents=True, exist_ok=True)
+        (cn_dir / "CNTEST.csv").write_text(
+            "\n".join(
+                [
+                    "symbol,date,open,high,low,close,volume,factor",
+                    "CNTEST,2026-05-05,21,22,20,21.5,1000,1",
+                    "CNTEST,2026-05-06,22,23,21,22.5,1200,1",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        config_path = self.project_root / "config_cn.yaml"
+        config_path.write_text(
+            "\n".join(
+                [
+                    "output:",
+                    "  root_dir: data/cn",
+                    "  qlib_csv_dir: data/cn/processed/qlib_csv",
+                    "  qlib_bin_dir: data/qlib/cn_csi800",
+                    "qlib:",
+                    "  qlib_repo_path: /tmp/qlib",
+                    "  python_bin: /tmp/qlib/.venv/bin/python",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        model = {"details": {"config_path": "config_cn.yaml"}}
+        with patch.object(simulate_portfolio, "get_model", return_value=model):
+            price = simulate_portfolio.get_price(
+                self.project_root,
+                "CNTEST",
+                dt.date(2026, 5, 6),
+                "open",
+                qlib_csv_dir=(self.project_root / "data" / "cn" / "processed" / "qlib_csv"),
+            )
+        self.assertEqual(22.0, price)

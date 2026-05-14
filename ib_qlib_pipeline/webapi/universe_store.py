@@ -51,6 +51,22 @@ DEFAULT_UNIVERSES: list[dict[str, Any]] = [
             "data_source": "external_daily",
         },
     },
+    {
+        "key": "cn_csi800",
+        "name": "CN CSI800",
+        "symbols_file": "symbols/cn/csi800_qlib.txt",
+        "description": "Current CSI800 universe built from the latest BaoStock HS300 and ZZ500 constituent lists",
+        "details": {
+            "family": "equity",
+            "scope": "csi800",
+            "status": "experimental",
+            "market": "cn",
+            "currency": "CNY",
+            "config_path": "config_cn.yaml",
+            "data_source": "baostock",
+            "warning": "current_constituents_not_point_in_time",
+        },
+    },
 ]
 
 

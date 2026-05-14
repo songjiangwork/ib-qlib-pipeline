@@ -234,6 +234,54 @@ DEFAULT_MODELS: list[dict[str, Any]] = [
             "notes": "Union 1D CatBoost experiment with 2016 training start and 8 threads",
         },
     },
+    {
+        "universe_key": "cn_csi800",
+        "key": "lgb_cn1",
+        "name": "LGB_CN1",
+        "model_class": "LGBModel",
+        "module_path": "qlib.contrib.model.gbdt",
+        "workflow_base": "examples/wf_lgb_cn1.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "cn_1d",
+            "scope": "csi800",
+            "market": "cn",
+            "config_path": "config_cn.yaml",
+            "notes": "First CN CSI800 LightGBM 1D experiment",
+        },
+    },
+    {
+        "universe_key": "cn_csi800",
+        "key": "xgb_cn1",
+        "name": "XGB_CN1",
+        "model_class": "XGBModel",
+        "module_path": "qlib.contrib.model.xgboost",
+        "workflow_base": "examples/wf_xgb_cn1.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "cn_1d",
+            "scope": "csi800",
+            "market": "cn",
+            "config_path": "config_cn.yaml",
+            "notes": "First CN CSI800 XGBoost 1D experiment",
+        },
+    },
+    {
+        "universe_key": "cn_csi800",
+        "key": "cat_cn1",
+        "name": "CAT_CN1",
+        "model_class": "CatBoostModel",
+        "module_path": "qlib.contrib.model.catboost_model",
+        "workflow_base": "examples/wf_cat_cn1.yaml",
+        "details": {
+            "family": "gbdt",
+            "variant": "cn_1d",
+            "scope": "csi800",
+            "market": "cn",
+            "config_path": "config_cn.yaml",
+            "notes": "First CN CSI800 CatBoost 1D experiment",
+        },
+    },
 ]
 
 
@@ -277,6 +325,9 @@ def ensure_default_models(db_path: Path, project_root: Path | None = None) -> No
     union = get_universe_by_key(db_path, "us_union_sp500_ndx_djia_sox")
     if union is not None:
         universe_id_by_key["us_union_sp500_ndx_djia_sox"] = int(union["id"])
+    cn_csi800 = get_universe_by_key(db_path, "cn_csi800")
+    if cn_csi800 is not None:
+        universe_id_by_key["cn_csi800"] = int(cn_csi800["id"])
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
         for model in DEFAULT_MODELS:

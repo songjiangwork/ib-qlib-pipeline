@@ -14,6 +14,7 @@ from ib_qlib_pipeline.cn_data.baostock_downloader import (
 )
 from ib_qlib_pipeline.cn_data.qlib_exporter import export_baostock_raw_to_qlib_csv
 from ib_qlib_pipeline.cn_data.symbols import (
+    load_baostock_constituent_codes,
     merge_qlib_symbol_lists,
     qlib_symbol_to_baostock,
     qlib_symbols_from_raw_codes,
@@ -51,6 +52,20 @@ class _FakeBaoStock:
         _ = (fields, start_date, end_date, frequency, adjustflag)
         return self.responses[code]
 
+    def query_hs300_stocks(self, date: str | None = None):
+        _ = date
+        return _FakeQueryResult(
+            [["2026-05-11", "sh.600000", "浦发银行"], ["2026-05-11", "sz.000001", "平安银行"]],
+            ["updateDate", "code", "code_name"],
+        )
+
+    def query_zz500_stocks(self, date: str | None = None):
+        _ = date
+        return _FakeQueryResult(
+            [["2026-05-11", "sh.600004", "白云机场"], ["2026-05-11", "sz.300750", "宁德时代"]],
+            ["updateDate", "code", "code_name"],
+        )
+
 
 class CnDataTestCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -74,6 +89,11 @@ class CnDataTestCase(unittest.TestCase):
         merged = merge_qlib_symbol_lists(["SH600519", "SZ000001"], ["SZ000001", "SZ300750"])
         self.assertEqual(["SH600519", "SZ000001", "SZ300750"], merged)
         self.assertEqual(["SH600519", "SZ000001"], qlib_symbols_from_raw_codes(["600519", "000001"]))
+
+    def test_load_baostock_constituent_codes(self) -> None:
+        fake = _FakeBaoStock({})
+        self.assertEqual(["sh.600000", "sz.000001"], load_baostock_constituent_codes("hs300", bs_module=fake))
+        self.assertEqual(["sh.600004", "sz.300750"], load_baostock_constituent_codes("zz500", bs_module=fake))
 
     def test_download_baostock_daily_writes_metadata_and_raw_csv(self) -> None:
         self.symbol_map.write_text("SH600000,sh.600000\nSZ000001,sz.000001\n", encoding="utf-8")

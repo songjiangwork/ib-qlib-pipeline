@@ -92,7 +92,16 @@ def build_ranking_for_signal_date(
 
 
 def _load_close_lookup(*, project_root: Path, symbols: list[str], signal_date: dt.date) -> dict[tuple[str, dt.date], float]:
-    return load_close_lookup(project_root, symbols=symbols, signal_dates=[signal_date])
+    try:
+        runtime_cfg = load_qlib_runtime_config(project_root)
+    except FileNotFoundError:
+        runtime_cfg = None
+    return load_close_lookup(
+        project_root,
+        symbols=symbols,
+        signal_dates=[signal_date],
+        qlib_csv_dir=runtime_cfg.qlib_csv_dir if runtime_cfg is not None else None,
+    )
 
 
 def next_rank_file(out_dir: Path, run_date: dt.date) -> Path:

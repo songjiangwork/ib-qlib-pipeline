@@ -12,8 +12,11 @@ from ..marketdata.price_provider import DailySqlitePriceProvider
 
 
 @lru_cache(maxsize=2048)
-def _load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
-    price_path = Path(project_root_str) / "data" / "processed" / "qlib_csv" / f"{symbol}.csv"
+def _load_price_frame(project_root_str: str, symbol: str, qlib_csv_dir_str: str | None = None) -> pd.DataFrame:
+    if qlib_csv_dir_str:
+        price_path = Path(qlib_csv_dir_str) / f"{symbol}.csv"
+    else:
+        price_path = Path(project_root_str) / "data" / "processed" / "qlib_csv" / f"{symbol}.csv"
     if not price_path.exists():
         raise FileNotFoundError(f"Missing price file for {symbol}: {price_path}")
     frame = pd.read_csv(price_path, usecols=["date", "open", "high", "low", "close", "volume"])
@@ -86,6 +89,7 @@ def load_close_lookup(
     *,
     symbols: Iterable[str],
     signal_dates: Iterable[dt.date],
+    qlib_csv_dir: Path | None = None,
 ) -> dict[tuple[str, dt.date], float]:
     symbol_list = [str(symbol).strip() for symbol in symbols if str(symbol).strip()]
     date_list = list(signal_dates)
@@ -103,7 +107,11 @@ def load_close_lookup(
     lookup: dict[tuple[str, dt.date], float] = {}
     for symbol in symbol_list:
         try:
-            frame = _load_price_frame(str(project_root), symbol)
+            frame = _load_price_frame(
+                str(project_root),
+                symbol,
+                str(qlib_csv_dir) if qlib_csv_dir is not None else None,
+            )
         except FileNotFoundError:
             continue
         subset = frame[frame["date"].isin(target_dates)]

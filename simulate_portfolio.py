@@ -12,6 +12,7 @@ import pandas as pd
 
 from ib_qlib_pipeline.marketdata.daily_db import default_daily_db_path
 from ib_qlib_pipeline.marketdata.price_provider import DailySqlitePriceProvider
+from ib_qlib_pipeline.qlib_runtime import load_qlib_runtime_config
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.model_store import get_model
 from ib_qlib_pipeline.webapi.portfolio_store import (
@@ -77,8 +78,11 @@ def parse_args() -> argparse.Namespace:
 
 
 @lru_cache(maxsize=1024)
-def load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
-    path = Path(project_root_str) / "data" / "processed" / "qlib_csv" / f"{symbol}.csv"
+def load_price_frame(project_root_str: str, symbol: str, qlib_csv_dir_str: str | None = None) -> pd.DataFrame:
+    if qlib_csv_dir_str:
+        path = Path(qlib_csv_dir_str) / f"{symbol}.csv"
+    else:
+        path = Path(project_root_str) / "data" / "processed" / "qlib_csv" / f"{symbol}.csv"
     if not path.exists():
         raise FileNotFoundError(f"Missing price file for {symbol}: {path}")
     frame = pd.read_csv(path, usecols=["date", "open", "close"])
@@ -87,7 +91,14 @@ def load_price_frame(project_root_str: str, symbol: str) -> pd.DataFrame:
     return frame
 
 
-def get_price(project_root: Path, symbol: str, trade_date: dt.date, field: str) -> float | None:
+def get_price(
+    project_root: Path,
+    symbol: str,
+    trade_date: dt.date,
+    field: str,
+    *,
+    qlib_csv_dir: Path | None = None,
+) -> float | None:
     db_path = default_daily_db_path(project_root)
     if db_path.exists():
         provider = DailySqlitePriceProvider(db_path)
@@ -101,7 +112,11 @@ def get_price(project_root: Path, symbol: str, trade_date: dt.date, field: str) 
             value = bars[-1].get(field)
             return float(value) if value is not None else None
     try:
-        frame = load_price_frame(str(project_root), symbol)
+        frame = load_price_frame(
+            str(project_root),
+            symbol,
+            str(qlib_csv_dir) if qlib_csv_dir is not None else None,
+        )
     except FileNotFoundError:
         return None
     hit = frame.loc[frame["date"] == trade_date, field]
@@ -221,9 +236,19 @@ def adjusted_execution_price(raw_price: float, *, side: str, strategy: StrategyR
     return raw_price * factor
 
 
-def previous_close(project_root: Path, symbol: str, trade_date: dt.date) -> float | None:
+def previous_close(
+    project_root: Path,
+    symbol: str,
+    trade_date: dt.date,
+    *,
+    qlib_csv_dir: Path | None = None,
+) -> float | None:
     try:
-        frame = load_price_frame(str(project_root), symbol)
+        frame = load_price_frame(
+            str(project_root),
+            symbol,
+            str(qlib_csv_dir) if qlib_csv_dir is not None else None,
+        )
     except FileNotFoundError:
         return None
     history = frame.loc[frame["date"] < trade_date, "close"]
@@ -232,10 +257,18 @@ def previous_close(project_root: Path, symbol: str, trade_date: dt.date) -> floa
     return float(history.iloc[-1])
 
 
-def blocked_by_gap_filter(project_root: Path, symbol: str, trade_date: dt.date, entry_open: float, strategy: StrategyRuntimeConfig) -> bool:
+def blocked_by_gap_filter(
+    project_root: Path,
+    symbol: str,
+    trade_date: dt.date,
+    entry_open: float,
+    strategy: StrategyRuntimeConfig,
+    *,
+    qlib_csv_dir: Path | None = None,
+) -> bool:
     if strategy.gap_up_limit_pct is None and strategy.gap_down_limit_pct is None:
         return False
-    prev_close = previous_close(project_root, symbol, trade_date)
+    prev_close = previous_close(project_root, symbol, trade_date, qlib_csv_dir=qlib_csv_dir)
     if prev_close is None or prev_close <= 0:
         return False
     gap_pct = ((entry_open / prev_close) - 1.0) * 100.0
@@ -253,8 +286,6 @@ def simulate() -> None:
     ensure_default_strategies(settings.db_path)
 
     project_root = settings.project_root
-    trading_days = read_available_trading_days(project_root)
-    next_day = next_trade_date_map(trading_days)
 
     start_date = dt.date.fromisoformat(args.start_date)
     end_date = dt.date.fromisoformat(args.end_date) if args.end_date else None
@@ -301,6 +332,16 @@ def simulate() -> None:
                 f"but --model-id={args.model_id} was provided"
             )
 
+    model = get_model(settings.db_path, int(args.model_id)) if args.model_id is not None else None
+    model_details = dict(model.get("details") or {}) if model is not None else {}
+    config_path = None
+    if model_details.get("config_path"):
+        config_path = (project_root / str(model_details["config_path"])).resolve()
+    runtime_cfg = load_qlib_runtime_config(project_root, config_path=config_path)
+    qlib_csv_dir = runtime_cfg.qlib_csv_dir
+    trading_days = read_available_trading_days(project_root, config_path=config_path)
+    next_day = next_trade_date_map(trading_days)
+
     signal_map = load_signal_map(
         settings.db_path,
         start_date=start_date.isoformat(),
@@ -328,7 +369,6 @@ def simulate() -> None:
             args.name
             or f"top{args.buy_top_n}-hold{args.hold_top_n}{model_suffix}-{args.start_date}-to-{end_date.isoformat()}"
         )
-        model = get_model(settings.db_path, int(args.model_id)) if args.model_id is not None else None
         strategy_runtime = resolve_strategy_runtime(
             db_path=settings.db_path,
             run_name=run_name,
@@ -382,7 +422,7 @@ def simulate() -> None:
         for symbol, lots in list(open_lots.items()):
             if symbol in top20_set:
                 continue
-            raw_exit_price = get_price(project_root, symbol, trade_date, "open")
+            raw_exit_price = get_price(project_root, symbol, trade_date, "open", qlib_csv_dir=qlib_csv_dir)
             if raw_exit_price is None:
                 status(f"[warn] missing open price for sell {symbol} on {trade_date.isoformat()}, keeping lot open")
                 continue
@@ -404,11 +444,18 @@ def simulate() -> None:
                 continue
             if strategy_runtime.max_open_positions is not None and sum(len(v) for v in open_lots.values()) >= strategy_runtime.max_open_positions:
                 break
-            raw_entry_price = get_price(project_root, symbol, trade_date, "open")
+            raw_entry_price = get_price(project_root, symbol, trade_date, "open", qlib_csv_dir=qlib_csv_dir)
             if raw_entry_price is None or raw_entry_price <= 0:
                 status(f"[warn] missing open price for buy {symbol} on {trade_date.isoformat()}, skipping")
                 continue
-            if blocked_by_gap_filter(project_root, symbol, trade_date, raw_entry_price, strategy_runtime):
+            if blocked_by_gap_filter(
+                project_root,
+                symbol,
+                trade_date,
+                raw_entry_price,
+                strategy_runtime,
+                qlib_csv_dir=qlib_csv_dir,
+            ):
                 status(f"[skip] gap filter blocked buy {symbol} on {trade_date.isoformat()}")
                 continue
             entry_price = adjusted_execution_price(raw_entry_price, side="buy", strategy=strategy_runtime)
@@ -444,7 +491,7 @@ def simulate() -> None:
             ]
 
         for symbol, lots in open_lots.items():
-            close_price = get_price(project_root, symbol, trade_date, "close")
+            close_price = get_price(project_root, symbol, trade_date, "close", qlib_csv_dir=qlib_csv_dir)
             if close_price is None:
                 status(f"[warn] missing close price for mark {symbol} on {trade_date.isoformat()}, skipping mark")
                 continue

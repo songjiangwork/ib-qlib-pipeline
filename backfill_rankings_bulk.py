@@ -177,6 +177,12 @@ def main() -> None:
     log(f"[ok] prediction rows loaded={len(pred_df)} dates={pred_df['signal_datetime'].dt.date.nunique()}", console_lines)
     symbols = pred_df["symbol"].dropna().astype(str).unique().tolist()
     close_cache = load_close_lookup(project_root, symbols=symbols, signal_dates=pending_days)
+    close_cache = load_close_lookup(
+        project_root,
+        symbols=symbols,
+        signal_dates=pending_days,
+        qlib_csv_dir=runtime_cfg.qlib_csv_dir,
+    )
     log(f"[ok] close cache loaded entries={len(close_cache)} symbols={len(symbols)} dates={len(pending_days)}", console_lines)
 
     for index, trade_date in enumerate(pending_days, start=1):

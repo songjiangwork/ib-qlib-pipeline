@@ -140,6 +140,42 @@ def qlib_symbols_from_raw_codes(raw_codes: Iterable[str]) -> list[str]:
     return dedupe_symbols(raw_code_to_qlib_symbol(code) for code in raw_codes)
 
 
+def load_baostock_constituent_codes(index_name: str, *, date: str | None = None, bs_module=None) -> list[str]:
+    if bs_module is None:
+        import baostock as bs_module  # type: ignore[import-not-found]
+
+    query_map = {
+        "hs300": bs_module.query_hs300_stocks,
+        "zz500": bs_module.query_zz500_stocks,
+    }
+    key = str(index_name).strip().lower()
+    if key not in query_map:
+        raise ValueError(f"Unsupported BaoStock index query: {index_name}")
+
+    lg = bs_module.login()
+    if str(getattr(lg, "error_code", "")) != "0":
+        raise RuntimeError(f"BaoStock login failed: {getattr(lg, 'error_msg', '')}")
+
+    try:
+        kwargs = {}
+        if date:
+            kwargs["date"] = date
+        rs = query_map[key](**kwargs)
+        error_code = str(getattr(rs, "error_code", ""))
+        error_msg = str(getattr(rs, "error_msg", ""))
+        if error_code != "0":
+            raise RuntimeError(f"BaoStock {index_name} query failed: {error_code} {error_msg}")
+        rows: list[str] = []
+        while rs.error_code == "0" and rs.next():
+            record = dict(zip(rs.fields, rs.get_row_data()))
+            code = str(record.get("code", "")).strip()
+            if code:
+                rows.append(code)
+        return rows
+    finally:
+        bs_module.logout()
+
+
 def write_symbol_lines(path: Path, symbols: Iterable[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [str(symbol).strip().upper() for symbol in symbols if str(symbol).strip()]
