@@ -572,10 +572,13 @@ class RankingBackendService:
             self._run_lock.release()
 
     def _execute_refresh_data_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        command = self._build_refresh_data_command(
+        config_path = str(payload.get("config_path") or "config.yaml")
+        market = str(payload.get("market") or self._market_for_config_path(config_path))
+        command = self._build_refresh_command(
+            market=market,
             client_id=int(payload["client_id"]),
             start_date=str(payload["start_date"]),
-            config_path=str(payload.get("config_path") or "config.yaml"),
+            config_path=config_path,
         )
         self._run_job_step(job_id, "refresh_data", command)
 
@@ -608,34 +611,44 @@ class RankingBackendService:
         include_portfolio = bool(payload.get("include_portfolio", True))
 
         models = [model for model in list_models(self.settings.db_path) if model.get("workflow_base")]
-        config_paths: list[str] = []
-        seen_config_paths: set[str] = set()
+        refresh_targets: list[tuple[str, str]] = []
+        seen_refresh_targets: set[tuple[str, str]] = set()
         for model in models:
             config_path = self._config_path_for_model(model)
-            if config_path in seen_config_paths:
+            market = self._market_for_model(model)
+            refresh_target = (market, config_path)
+            if refresh_target in seen_refresh_targets:
                 continue
-            seen_config_paths.add(config_path)
-            config_paths.append(config_path)
+            seen_refresh_targets.add(refresh_target)
+            refresh_targets.append(refresh_target)
 
-        for config_path in config_paths:
+        for market, config_path in refresh_targets:
             step_suffix = Path(config_path).stem
+            step_prefix = "refresh_cn" if market == "cn" else "refresh_data"
             self._run_job_step(
                 job_id,
-                f"refresh_data_{step_suffix}",
-                self._build_refresh_data_command(
+                f"{step_prefix}_{step_suffix}",
+                self._build_refresh_command(
+                    market=market,
                     client_id=client_id,
                     start_date=start_date,
                     config_path=config_path,
                 ),
             )
 
-        trading_days = read_available_trading_days(self.settings.project_root)
         start_bound = dt.date.fromisoformat(start_date)
+        trading_days_by_config: dict[str, list[dt.date]] = {}
         for model in models:
+            config_path = self._config_path_for_model(model)
+            if config_path not in trading_days_by_config:
+                trading_days_by_config[config_path] = read_available_trading_days(
+                    self.settings.project_root,
+                    config_path=(self.settings.project_root / config_path).resolve(),
+                )
             missing_days = self._missing_signal_days_for_model(
                 model_id=int(model["id"]),
                 trade_date=trade_date,
-                trading_days=trading_days,
+                trading_days=trading_days_by_config[config_path],
                 fallback_start_date=start_bound,
             )
             if not missing_days:
@@ -656,8 +669,11 @@ class RankingBackendService:
         if not include_portfolio:
             return
 
-        append_end_date = self._previous_trading_day(trade_date).isoformat()
         for model in models:
+            append_end_date = self._previous_trading_day(
+                trade_date,
+                config_path=self._config_path_for_model(model),
+            ).isoformat()
             portfolio_run = self._latest_portfolio_run_for_model(int(model["id"]))
             if portfolio_run is None:
                 self._record_job_note(
@@ -767,6 +783,25 @@ class RankingBackendService:
                 last_run_status="succeeded",
             )
 
+    def _build_refresh_command(
+        self,
+        *,
+        market: str,
+        client_id: int,
+        start_date: str,
+        config_path: str = "config.yaml",
+    ) -> list[str]:
+        if market == "cn":
+            return self._build_refresh_cn_command(
+                start_date=start_date,
+                config_path=config_path,
+            )
+        return self._build_refresh_data_command(
+            client_id=client_id,
+            start_date=start_date,
+            config_path=config_path,
+        )
+
     def _build_refresh_data_command(
         self,
         *,
@@ -788,6 +823,22 @@ class RankingBackendService:
             "1 day",
             "--no-news",
             "--dump-bin",
+        ]
+
+    def _build_refresh_cn_command(
+        self,
+        *,
+        start_date: str,
+        config_path: str = "config_cn.yaml",
+    ) -> list[str]:
+        python_bin = self.settings.project_root / ".venv" / "bin" / "python"
+        return [
+            str(python_bin),
+            "scripts/refresh_cn_daily_baostock.py",
+            "--config",
+            config_path,
+            "--start-date",
+            start_date,
         ]
 
     def _build_backfill_command(
@@ -856,6 +907,27 @@ class RankingBackendService:
             return "config_union.yaml"
         return "config.yaml"
 
+    def _market_for_model(self, model: dict[str, Any]) -> str:
+        details = model.get("details") or {}
+        market = details.get("market")
+        if isinstance(market, str) and market.strip():
+            return market.strip().lower()
+        universe_id = model.get("universe_id")
+        if universe_id is not None:
+            universe = get_universe_record(self.settings.db_path, int(universe_id))
+            if universe is not None:
+                details = universe.get("details") or {}
+                market = details.get("market")
+                if isinstance(market, str) and market.strip():
+                    return market.strip().lower()
+        return self._market_for_config_path(self._config_path_for_model(model))
+
+    def _market_for_config_path(self, config_path: str) -> str:
+        stem = Path(config_path).stem.lower()
+        if stem.endswith("_cn") or stem.startswith("config_cn") or "_cn" in stem:
+            return "cn"
+        return "us"
+
     def _build_append_portfolio_command(
         self,
         *,
@@ -876,8 +948,11 @@ class RankingBackendService:
             command.extend(["--model-id", str(model_id)])
         return command
 
-    def _previous_trading_day(self, trade_date: dt.date) -> dt.date:
-        trading_days = read_available_trading_days(self.settings.project_root)
+    def _previous_trading_day(self, trade_date: dt.date, config_path: str = "config.yaml") -> dt.date:
+        trading_days = read_available_trading_days(
+            self.settings.project_root,
+            config_path=(self.settings.project_root / config_path).resolve(),
+        )
         prior_days = [day for day in trading_days if day < trade_date]
         if not prior_days:
             raise RuntimeError(f"No prior trading day found before {trade_date.isoformat()}")

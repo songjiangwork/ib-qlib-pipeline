@@ -920,6 +920,12 @@ class StoreTestCase(unittest.TestCase):
         service = self._make_service()
 
         refresh = service._build_refresh_data_command(client_id=151, start_date="2026-05-01")
+        refresh_cn = service._build_refresh_command(
+            market="cn",
+            client_id=151,
+            start_date="2026-05-01",
+            config_path="config_cn.yaml",
+        )
         backfill = service._build_backfill_command(
             signal_date="2026-05-06",
             workflow_base="examples/workflow_us_xgb_2020_port.yaml",
@@ -942,6 +948,8 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual("run.py", refresh[1])
         self.assertIn("config.yaml", refresh)
         self.assertIn("--dump-bin", refresh)
+        self.assertEqual("scripts/refresh_cn_daily_baostock.py", refresh_cn[1])
+        self.assertIn("config_cn.yaml", refresh_cn)
         self.assertEqual("backfill_rankings_bulk.py", backfill[1])
         self.assertIn("config.yaml", backfill)
         self.assertIn("--skip-existing-db", backfill)
@@ -1293,6 +1301,7 @@ class StoreTestCase(unittest.TestCase):
         models = [
             {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml", "universe_id": 1, "universe_key": "sp500"},
             {"id": 2, "key": "xgb_union", "name": "XGBoost_Default_Union", "workflow_base": "examples/workflow_us_xgb_2020_port.yaml", "universe_id": 2, "universe_key": "us_union_sp500_ndx_djia_sox"},
+            {"id": 185, "key": "cat_cn1", "name": "CAT_CN1", "workflow_base": "examples/wf_cat_cn1.yaml", "universe_id": 4, "universe_key": "cn_csi800", "details": {"config_path": "config_cn.yaml"}},
         ]
         payload = {
             "trade_date": "2026-05-06",
@@ -1303,9 +1312,16 @@ class StoreTestCase(unittest.TestCase):
 
         with (
             patch("ib_qlib_pipeline.webapi.service.list_models", return_value=models),
-            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", return_value=[dt.date(2026, 5, 5), dt.date(2026, 5, 6)]),
-            patch.object(service, "_missing_signal_days_for_model", side_effect=[[dt.date(2026, 5, 5)], [dt.date(2026, 5, 5), dt.date(2026, 5, 6)]]),
-            patch.object(service, "_latest_portfolio_run_for_model", side_effect=[{"id": 11, "model_id": 1}, None]),
+            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", side_effect=[
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
+            ]),
+            patch.object(service, "_missing_signal_days_for_model", side_effect=[[dt.date(2026, 5, 5)], [dt.date(2026, 5, 5), dt.date(2026, 5, 6)], [dt.date(2026, 5, 6)]]),
+            patch.object(service, "_latest_portfolio_run_for_model", side_effect=[{"id": 11, "model_id": 1}, None, {"id": 22, "model_id": 185}]),
             patch.object(service, "_run_job_step", return_value="ok") as run_job_step,
             patch.object(service, "_record_job_note") as record_note,
         ):
@@ -1316,9 +1332,12 @@ class StoreTestCase(unittest.TestCase):
             [
                 "refresh_data_config",
                 "refresh_data_config_union",
+                "refresh_cn_config_cn",
                 "backfill_lgb_2026-05-05_to_2026-05-05",
                 "backfill_xgb_union_2026-05-05_to_2026-05-06",
+                "backfill_cat_cn1_2026-05-06_to_2026-05-06",
                 "append_lgb_portfolio",
+                "append_cat_cn1_portfolio",
             ],
             called_steps,
         )
