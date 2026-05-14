@@ -66,6 +66,60 @@ class UniverseSymbol(Base):
     universe: Mapped[Universe] = relationship(back_populates="symbols")
 
 
+class Instrument(Base):
+    __tablename__ = "instruments"
+    __table_args__ = (
+        Index("idx_instruments_asset_type", "asset_type"),
+        Index("idx_instruments_country", "country"),
+        Index("idx_instruments_exchange", "exchange"),
+        Index("idx_instruments_industry", "industry"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    canonical_symbol: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    display_symbol: Mapped[str] = mapped_column(Text, nullable=False)
+    asset_type: Mapped[str] = mapped_column(Text, nullable=False)
+    country: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    exchange: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    name_en: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    name_zh: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sector: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    sub_industry: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    business_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    website: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ipo_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    delist_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    listing_status: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    source_updated_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    aliases: Mapped[list["InstrumentAlias"]] = relationship(
+        back_populates="instrument",
+        cascade="all, delete-orphan",
+    )
+
+
+class InstrumentAlias(Base):
+    __tablename__ = "instrument_aliases"
+    __table_args__ = (
+        UniqueConstraint("alias_type", "alias_value"),
+        Index("idx_instrument_aliases_instrument_id", "instrument_id"),
+        Index("idx_instrument_aliases_alias_value", "alias_value"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    instrument_id: Mapped[int] = mapped_column(ForeignKey("instruments.id", ondelete="CASCADE"), nullable=False)
+    alias_type: Mapped[str] = mapped_column(Text, nullable=False)
+    alias_value: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    instrument: Mapped[Instrument] = relationship(back_populates="aliases")
+
+
 class Schedule(Base):
     __tablename__ = "schedules"
 

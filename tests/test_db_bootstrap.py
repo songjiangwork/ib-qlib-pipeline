@@ -26,6 +26,8 @@ class DbBootstrapTestCase(unittest.TestCase):
         tables = set(inspector.get_table_names())
         self.assertIn("universes", tables)
         self.assertIn("universe_symbols", tables)
+        self.assertIn("instruments", tables)
+        self.assertIn("instrument_aliases", tables)
         self.assertIn("models", tables)
         self.assertIn("strategies", tables)
         self.assertIn("runs", tables)

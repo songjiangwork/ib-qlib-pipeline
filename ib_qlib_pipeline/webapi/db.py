@@ -12,6 +12,8 @@ from ..dborm.session import create_engine_for_path
 RANKING_DB_TABLES = [
     "universes",
     "universe_symbols",
+    "instruments",
+    "instrument_aliases",
     "models",
     "strategies",
     "schedules",
