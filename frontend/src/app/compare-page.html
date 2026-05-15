@@ -86,7 +86,7 @@
             [class.active]="state.isCompareSelected(symbol)"
             (click)="toggleSymbol(symbol)"
           >
-            {{ symbol }}
+            {{ displaySymbol(symbol) }}
           </button>
         }
       </div>
@@ -125,7 +125,7 @@
                 <tr>
                   <td>
                     <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
-                      {{ row.symbol }}
+                      {{ displaySymbol(row.symbol) }}
                     </button>
                   </td>
                   <td>{{ row.timesEntered }}</td>

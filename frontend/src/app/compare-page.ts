@@ -9,6 +9,7 @@ import { FrontendStateService, PortfolioLot } from './frontend-state.service';
 
 interface CompareRow {
   symbol: string;
+  displayName: string | null;
   timesEntered: number;
   closedLots: number;
   openLots: number;
@@ -133,6 +134,11 @@ export class ComparePage {
     await this.selectPortfolioRun(portfolioRunId);
   }
 
+  protected displaySymbol(symbol: string): string {
+    const displayName = this.state.displayNameForSymbol(symbol);
+    return displayName ? `${displayName} · ${symbol}` : symbol;
+  }
+
   protected setSymbolFilter(value: string): void {
     this.symbolFilter.set(value);
   }
@@ -181,6 +187,7 @@ export class ComparePage {
 
     return {
       symbol,
+      displayName: this.state.displayNameForSymbol(symbol),
       timesEntered: lots.length,
       closedLots: closed.length,
       openLots: open.length,

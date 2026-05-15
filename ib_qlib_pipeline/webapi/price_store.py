@@ -126,9 +126,14 @@ def compute_forward_metrics(
     entry_date: dt.date,
     entry_price: float | None,
     horizons: list[int],
+    qlib_csv_dir: Path | None = None,
 ) -> dict[str, dict[str, Any] | None]:
     try:
-        frame = _load_price_frame(str(project_root), symbol)
+        frame = _load_price_frame(
+            str(project_root),
+            symbol,
+            str(qlib_csv_dir) if qlib_csv_dir is not None else None,
+        )
     except FileNotFoundError:
         return {"latest": None, **{f"{h}d": None for h in horizons}}
 
@@ -163,6 +168,7 @@ def summarize_performance(
     project_root: Path,
     recommendations: list[dict[str, Any]],
     horizons: list[int],
+    qlib_csv_dir: Path | None = None,
 ) -> dict[str, dict[str, Any]]:
     labels = [f"{h}d" for h in horizons] + ["latest"]
     buckets: dict[str, list[float]] = {label: [] for label in labels}
@@ -174,6 +180,7 @@ def summarize_performance(
             entry_date=dt.date.fromisoformat(str(row["signal_date"])),
             entry_price=float(row["entry_price"]) if row["entry_price"] is not None else None,
             horizons=horizons,
+            qlib_csv_dir=qlib_csv_dir,
         )
         row["performance"] = metrics
         for label in labels:

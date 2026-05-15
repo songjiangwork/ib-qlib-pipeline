@@ -50,6 +50,23 @@ def get_instrument_by_symbol(db_path: Path, canonical_symbol: str) -> dict[str, 
     return _instrument_to_dict(item)
 
 
+def get_instruments_by_symbols(db_path: Path, canonical_symbols: Iterable[str]) -> dict[str, dict[str, Any]]:
+    normalized = sorted(
+        {
+            str(symbol).strip().upper()
+            for symbol in canonical_symbols
+            if str(symbol).strip()
+        }
+    )
+    if not normalized:
+        return {}
+    with _session_for_db(db_path) as session:
+        rows = session.execute(
+            select(Instrument).where(Instrument.canonical_symbol.in_(normalized))
+        ).scalars().all()
+    return {str(item.canonical_symbol): _instrument_to_dict(item) for item in rows}
+
+
 def list_instruments(
     db_path: Path,
     *,

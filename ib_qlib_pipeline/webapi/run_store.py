@@ -7,7 +7,7 @@ from typing import Any
 import pandas as pd
 from sqlalchemy import func, select
 
-from ..dborm.models import ModelRef, Recommendation, Run, Schedule, Universe
+from ..dborm.models import Instrument, ModelRef, Recommendation, Run, Schedule, Universe
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -354,10 +354,26 @@ def get_run_recommendations(db_path: Path, run_id: int) -> list[dict[str, Any]]:
             .where(Recommendation.run_id == run_id)
             .order_by(Recommendation.rank)
         ).scalars().all()
+        symbols = sorted({str(row.symbol).strip().upper() for row in rows if row.symbol})
+        instrument_map: dict[str, Instrument] = {}
+        if symbols:
+            instrument_rows = session.execute(
+                select(Instrument).where(Instrument.canonical_symbol.in_(symbols))
+            ).scalars().all()
+            instrument_map = {str(item.canonical_symbol): item for item in instrument_rows}
         return [
             {
                 "rank": row.rank,
                 "symbol": row.symbol,
+                "display_name": (
+                    (
+                        instrument_map[str(row.symbol).strip().upper()].name_zh
+                        or instrument_map[str(row.symbol).strip().upper()].name_en
+                        or instrument_map[str(row.symbol).strip().upper()].display_symbol
+                    )
+                    if str(row.symbol).strip().upper() in instrument_map
+                    else None
+                ),
                 "score": row.score,
                 "percentile": row.percentile,
                 "entry_price": row.entry_price,

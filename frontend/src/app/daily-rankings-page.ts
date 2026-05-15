@@ -20,7 +20,7 @@ export class DailyRankingsPage {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly sortKey = signal<
-    'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest'
+    'rank' | 'symbol' | 'display_name' | 'percentile' | 'entry_price' | 'oneDay' | 'latest'
   >('rank');
   private readonly sortDirection = signal<'asc' | 'desc'>('asc');
   protected readonly sortedRankingDates = computed(() =>
@@ -113,7 +113,7 @@ export class DailyRankingsPage {
   private lastAppliedQueryKey: string | null = null;
 
   protected toggleSort(
-    key: 'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest',
+    key: 'rank' | 'symbol' | 'display_name' | 'percentile' | 'entry_price' | 'oneDay' | 'latest',
   ): void {
     if (this.sortKey() === key) {
       this.sortDirection.set(this.sortDirection() === 'asc' ? 'desc' : 'asc');
@@ -124,7 +124,7 @@ export class DailyRankingsPage {
   }
 
   protected sortMarker(
-    key: 'rank' | 'symbol' | 'score' | 'percentile' | 'entry_price' | 'oneDay' | 'latest',
+    key: 'rank' | 'symbol' | 'display_name' | 'percentile' | 'entry_price' | 'oneDay' | 'latest',
   ): string {
     if (this.sortKey() !== key) {
       return '';
@@ -219,8 +219,8 @@ export class DailyRankingsPage {
   }
 
   private compareRows(
-    a: { rank: number; symbol: string; score: number; percentile: number | null; entry_price: number | null; performance?: any },
-    b: { rank: number; symbol: string; score: number; percentile: number | null; entry_price: number | null; performance?: any },
+    a: { rank: number; symbol: string; display_name?: string | null; percentile: number | null; entry_price: number | null; performance?: any },
+    b: { rank: number; symbol: string; display_name?: string | null; percentile: number | null; entry_price: number | null; performance?: any },
   ): number {
     const key = this.sortKey();
     const dir = this.sortDirection() === 'asc' ? 1 : -1;

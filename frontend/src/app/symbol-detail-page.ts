@@ -120,6 +120,13 @@ export class SymbolDetailPage {
       maxPrice: Math.max(...closes),
     };
   });
+  protected readonly currentInstrument = computed(() => {
+    const symbol = this.lifecycle()?.symbol ?? null;
+    if (!symbol) {
+      return null;
+    }
+    return this.state.instrumentMap()[symbol] ?? null;
+  });
   protected readonly tradeEvents = computed<TradeEvent[]>(() => {
     const lots = this.lifecycle()?.lots ?? [];
     return lots
@@ -253,6 +260,12 @@ export class SymbolDetailPage {
       return `${run.model_name} (${run.model_key || 'n/a'})`;
     }
     return 'N/A';
+  }
+
+  protected symbolDisplay(): string {
+    const symbol = this.lifecycle()?.symbol ?? '';
+    const displayName = this.state.displayNameForSymbol(symbol);
+    return displayName ? `${displayName} · ${symbol}` : symbol || 'N/A';
   }
 
   protected async setInterval(interval: '1d'): Promise<void> {

@@ -103,10 +103,10 @@
           <thead>
             <tr>
                   <th><button type="button" class="sort-button" (click)="toggleSort('rank')">Rank{{ sortMarker('rank') }}</button></th>
+                  <th><button type="button" class="sort-button" (click)="toggleSort('display_name')">{{ i18n.t('displayName') }}{{ sortMarker('display_name') }}</button></th>
                   <th><button type="button" class="sort-button" (click)="toggleSort('symbol')">{{ i18n.t('symbol') }}{{ sortMarker('symbol') }}</button></th>
                   <th>{{ i18n.t('action') }}</th>
                   <th>{{ i18n.t('held') }}</th>
-                  <th><button type="button" class="sort-button" (click)="toggleSort('score')">{{ i18n.t('score') }}{{ sortMarker('score') }}</button></th>
                   <th><button type="button" class="sort-button" (click)="toggleSort('percentile')">{{ i18n.t('percentile') }}{{ sortMarker('percentile') }}</button></th>
                   <th><button type="button" class="sort-button" (click)="toggleSort('entry_price')">{{ i18n.t('referenceClose') }}{{ sortMarker('entry_price') }}</button></th>
               <th><button type="button" class="sort-button" (click)="toggleSort('oneDay')">1D{{ sortMarker('oneDay') }}</button></th>
@@ -117,6 +117,7 @@
                 @for (row of top20(); track row.rank) {
                   <tr>
                     <td>{{ row.rank }}</td>
+                    <td>{{ row.display_name || state.displayNameForSymbol(row.symbol) || '' }}</td>
                     <td>
                       <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
                         {{ row.symbol }}
@@ -136,7 +137,6 @@
                         <span class="flag flat">{{ i18n.t('flat') }}</span>
                       }
                     </td>
-                    <td>{{ row.score | number:'1.4-4' }}</td>
                     <td>{{ row.percentile === null ? 'N/A' : (row.percentile | number:'1.2-2') + '%' }}</td>
                     <td>{{ row.entry_price === null ? 'N/A' : (row.entry_price | number:'1.2-2') }}</td>
                 <td>{{ row.performance?.['1d'] ? (row.performance?.['1d']?.return_pct | number:'1.2-2') + '%' : 'N/A' }}</td>

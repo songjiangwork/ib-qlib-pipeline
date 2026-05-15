@@ -14,7 +14,7 @@
         <span>{{ i18n.t('symbol') }}</span>
         <select [value]="lifecycle()?.symbol || ''" (change)="onSymbolChange($any($event.target).value)">
           @for (symbol of state.symbolsInRun(); track symbol) {
-            <option [value]="symbol">{{ symbol }}</option>
+            <option [value]="symbol">{{ state.displayNameForSymbol(symbol) ? state.displayNameForSymbol(symbol) + ' · ' + symbol : symbol }}</option>
           }
         </select>
       </label>
@@ -31,7 +31,7 @@
       <div class="head-summaries">
         <div class="summary">
           <span>{{ i18n.t('symbol') }}</span>
-          <strong>{{ lifecycle()!.symbol }}</strong>
+          <strong>{{ symbolDisplay() }}</strong>
         </div>
         <div class="summary">
           <span>{{ i18n.t('portfolioRun') }}</span>
@@ -103,6 +103,29 @@
         </strong>
       </article>
     </div>
+
+    <section class="panel">
+      <div class="panel-head">
+        <h3>{{ i18n.t('staticInfo') }}</h3>
+      </div>
+      @if (currentInstrument()) {
+        <div class="summary-grid">
+          <article class="summary-card"><span>{{ i18n.t('displayName') }}</span><strong>{{ currentInstrument()!.name_zh || currentInstrument()!.name_en || currentInstrument()!.display_symbol || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('exchange') }}</span><strong>{{ currentInstrument()!.exchange || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('industry') }}</span><strong>{{ currentInstrument()!.industry || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('sector') }}</span><strong>{{ currentInstrument()!.sector || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('currency') }}</span><strong>{{ currentInstrument()!.currency || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('listingStatus') }}</span><strong>{{ currentInstrument()!.listing_status || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('ipoDate') }}</span><strong>{{ currentInstrument()!.ipo_date || 'N/A' }}</strong></article>
+          <article class="summary-card"><span>{{ i18n.t('delistDate') }}</span><strong>{{ currentInstrument()!.delist_date || 'N/A' }}</strong></article>
+        </div>
+        @if (currentInstrument()!.business_summary) {
+          <div class="notice">{{ currentInstrument()!.business_summary }}</div>
+        }
+      } @else {
+        <div class="empty">{{ i18n.t('noStaticInfo') }}</div>
+      }
+    </section>
 
     <section class="panel">
       <div class="panel-head">

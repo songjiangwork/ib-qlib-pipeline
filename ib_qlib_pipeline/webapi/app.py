@@ -15,6 +15,8 @@ from .portfolio_store import (
     list_portfolio_runs,
 )
 from .model_store import list_models
+from ..qlib_runtime import load_qlib_runtime_config
+from .instrument_store import get_instrument_by_symbol, get_instruments_by_symbols
 from .schemas import (
     DataRefreshJobRequest,
     DailyClosePipelineJobRequest,
@@ -116,6 +118,18 @@ def create_app() -> FastAPI:
             return get_service().list_universe_symbols(universe_id)
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/instruments")
+    def get_instruments(symbols: str = Query(...)) -> dict[str, dict[str, Any]]:
+        items = [part.strip().upper() for part in symbols.split(",") if part.strip()]
+        return get_instruments_by_symbols(settings.db_path, items)
+
+    @app.get("/api/instruments/{symbol}")
+    def get_instrument(symbol: str) -> dict[str, Any]:
+        row = get_instrument_by_symbol(settings.db_path, symbol.strip().upper())
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"Instrument {symbol} not found")
+        return row
 
     @app.post("/api/universes")
     def create_universe(payload: UniverseCreate) -> dict[str, Any]:
@@ -243,7 +257,25 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         recommendations = get_service().get_run_recommendations(run_id)
         parsed_horizons = [int(part) for part in horizons.split(",") if part.strip()]
-        summary = summarize_performance(settings.project_root, recommendations, parsed_horizons)
+        config_path: str | None = None
+        model_id = run.get("model_id")
+        if model_id is not None:
+            model = next((item for item in list_models(settings.db_path) if item["id"] == model_id), None)
+            if model is not None:
+                details = model.get("details") or {}
+                raw_config_path = details.get("config_path")
+                if isinstance(raw_config_path, str) and raw_config_path.strip():
+                    config_path = raw_config_path.strip()
+        runtime_cfg = load_qlib_runtime_config(
+            settings.project_root,
+            config_path=(settings.project_root / config_path).resolve() if config_path else None,
+        )
+        summary = summarize_performance(
+            settings.project_root,
+            recommendations,
+            parsed_horizons,
+            qlib_csv_dir=runtime_cfg.qlib_csv_dir,
+        )
         return {
             "run": run,
             "horizons": parsed_horizons,

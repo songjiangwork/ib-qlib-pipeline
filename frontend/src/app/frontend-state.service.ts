@@ -156,11 +156,36 @@ export interface PerformanceMetric {
 export interface RecommendationRow {
   rank: number;
   symbol: string;
+  display_name?: string | null;
   score: number;
   percentile: number | null;
   entry_price: number | null;
   signal_date: string;
   performance?: Record<string, PerformanceMetric | null>;
+}
+
+export interface InstrumentInfo {
+  id: number;
+  canonical_symbol: string;
+  display_symbol: string;
+  asset_type: string;
+  country?: string | null;
+  exchange?: string | null;
+  currency?: string | null;
+  name_en?: string | null;
+  name_zh?: string | null;
+  sector?: string | null;
+  industry?: string | null;
+  sub_industry?: string | null;
+  business_summary?: string | null;
+  website?: string | null;
+  ipo_date?: string | null;
+  delist_date?: string | null;
+  listing_status?: string | null;
+  source?: string | null;
+  source_updated_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 }
 
 export interface RecommendationSummary {
@@ -279,6 +304,7 @@ export class FrontendStateService {
   readonly compareSymbols = signal<string[]>([]);
   readonly selectedSymbolLifecycle = signal<PortfolioSymbolLifecycle | null>(null);
   readonly selectedSymbolPriceBars = signal<PriceBar[]>([]);
+  readonly instrumentMap = signal<Record<string, InstrumentInfo>>({});
   readonly selectedPriceInterval = signal<'1d'>('1d');
   readonly jobs = signal<JobSummary[]>([]);
   readonly schedules = signal<ScheduleItem[]>([]);
@@ -614,6 +640,7 @@ export class FrontendStateService {
         this.selectedUniverseId.set(selectedRun.universe_id);
       }
       this.portfolioLots.set(lots ?? []);
+      await this.loadInstrumentsForSymbols((lots ?? []).map((lot) => lot.symbol));
       const symbols = new Set((lots ?? []).map((lot) => lot.symbol));
       this.compareSymbols.set(this.compareSymbols().filter((symbol) => symbols.has(symbol)));
       await this.loadRankingDates(true);
@@ -678,6 +705,7 @@ export class FrontendStateService {
         ),
       );
       this.selectedSymbolLifecycle.set(lifecycle ?? null);
+      await this.loadInstrumentsForSymbols([symbol]);
       await this.loadSymbolPriceBars(symbol, lifecycle?.lots ?? []);
     } catch {
       this.selectedSymbolLifecycle.set(null);
@@ -762,6 +790,17 @@ export class FrontendStateService {
     return this.compareSymbols().includes(symbol);
   }
 
+  displayNameForSymbol(symbol: string | null | undefined): string | null {
+    if (!symbol) {
+      return null;
+    }
+    const item = this.instrumentMap()[symbol.trim().toUpperCase()];
+    if (!item) {
+      return null;
+    }
+    return item.name_zh || item.name_en || item.display_symbol || null;
+  }
+
   isBoughtOnSignal(symbol: string, signalDate: string | null | undefined): boolean {
     if (!signalDate) {
       return false;
@@ -811,6 +850,26 @@ export class FrontendStateService {
       this.selectedSymbolPriceBars.set(prices ?? []);
     } catch {
       this.selectedSymbolPriceBars.set([]);
+    }
+  }
+
+  private async loadInstrumentsForSymbols(symbols: string[]): Promise<void> {
+    const normalized = Array.from(new Set(symbols.map((symbol) => symbol.trim().toUpperCase()).filter(Boolean)));
+    if (!normalized.length) {
+      return;
+    }
+    try {
+      const rows = await firstValueFrom(
+        this.http.get<Record<string, InstrumentInfo>>('/api/instruments', {
+          params: { symbols: normalized.join(',') },
+        }),
+      );
+      this.instrumentMap.set({
+        ...this.instrumentMap(),
+        ...(rows ?? {}),
+      });
+    } catch {
+      // best-effort only
     }
   }
 }
