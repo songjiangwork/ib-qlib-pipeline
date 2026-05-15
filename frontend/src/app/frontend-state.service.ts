@@ -801,6 +801,21 @@ export class FrontendStateService {
     return item.name_zh || item.name_en || item.display_symbol || null;
   }
 
+  isCnASymbol(symbol: string | null | undefined): boolean {
+    if (!symbol) {
+      return false;
+    }
+    return /^(SH|SZ)\d{6}$/.test(symbol.trim().toUpperCase());
+  }
+
+  sinaFinanceUrl(symbol: string | null | undefined): string | null {
+    if (!this.isCnASymbol(symbol)) {
+      return null;
+    }
+    const normalized = symbol!.trim().toLowerCase();
+    return `https://finance.sina.com.cn/realstock/company/${normalized}/nc.shtml`;
+  }
+
   isBoughtOnSignal(symbol: string, signalDate: string | null | undefined): boolean {
     if (!signalDate) {
       return false;

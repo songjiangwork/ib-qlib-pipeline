@@ -217,6 +217,15 @@ td {
   cursor: pointer;
 }
 
+.external-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.external-link:hover {
+  text-decoration: underline;
+}
+
 .sort-button {
   border: 0;
   background: none;

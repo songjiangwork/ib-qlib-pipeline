@@ -31,7 +31,20 @@
       <div class="head-summaries">
         <div class="summary">
           <span>{{ i18n.t('symbol') }}</span>
-          <strong>{{ symbolDisplay() }}</strong>
+          <strong>
+            @if (state.sinaFinanceUrl(lifecycle()!.symbol) && state.displayNameForSymbol(lifecycle()!.symbol)) {
+              <a
+                class="external-link"
+                [href]="state.sinaFinanceUrl(lifecycle()!.symbol)!"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {{ symbolDisplay() }}
+              </a>
+            } @else {
+              {{ symbolDisplay() }}
+            }
+          </strong>
         </div>
         <div class="summary">
           <span>{{ i18n.t('portfolioRun') }}</span>
@@ -110,7 +123,23 @@
       </div>
       @if (currentInstrument()) {
         <div class="summary-grid">
-          <article class="summary-card"><span>{{ i18n.t('displayName') }}</span><strong>{{ currentInstrument()!.name_zh || currentInstrument()!.name_en || currentInstrument()!.display_symbol || 'N/A' }}</strong></article>
+          <article class="summary-card">
+            <span>{{ i18n.t('displayName') }}</span>
+            <strong>
+              @if (state.sinaFinanceUrl(lifecycle()!.symbol) && (currentInstrument()!.name_zh || currentInstrument()!.name_en || currentInstrument()!.display_symbol)) {
+                <a
+                  class="external-link"
+                  [href]="state.sinaFinanceUrl(lifecycle()!.symbol)!"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  {{ currentInstrument()!.name_zh || currentInstrument()!.name_en || currentInstrument()!.display_symbol }}
+                </a>
+              } @else {
+                {{ currentInstrument()!.name_zh || currentInstrument()!.name_en || currentInstrument()!.display_symbol || 'N/A' }}
+              }
+            </strong>
+          </article>
           <article class="summary-card"><span>{{ i18n.t('exchange') }}</span><strong>{{ currentInstrument()!.exchange || 'N/A' }}</strong></article>
           <article class="summary-card"><span>{{ i18n.t('industry') }}</span><strong>{{ currentInstrument()!.industry || 'N/A' }}</strong></article>
           <article class="summary-card"><span>{{ i18n.t('sector') }}</span><strong>{{ currentInstrument()!.sector || 'N/A' }}</strong></article>

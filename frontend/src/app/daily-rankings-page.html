@@ -117,7 +117,20 @@
                 @for (row of top20(); track row.rank) {
                   <tr>
                     <td>{{ row.rank }}</td>
-                    <td>{{ row.display_name || state.displayNameForSymbol(row.symbol) || '' }}</td>
+                    <td>
+                      @if (state.sinaFinanceUrl(row.symbol) && (row.display_name || state.displayNameForSymbol(row.symbol))) {
+                        <a
+                          class="external-link"
+                          [href]="state.sinaFinanceUrl(row.symbol)!"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {{ row.display_name || state.displayNameForSymbol(row.symbol) }}
+                        </a>
+                      } @else {
+                        {{ row.display_name || state.displayNameForSymbol(row.symbol) || '' }}
+                      }
+                    </td>
                     <td>
                       <button type="button" class="linkish" (click)="openSymbol(row.symbol)">
                         {{ row.symbol }}
