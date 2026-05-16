@@ -9,6 +9,10 @@ from pathlib import Path
 
 import yaml
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
 from ib_qlib_pipeline.cn_data.qlib_exporter import export_baostock_raw_to_qlib_csv
 from ib_qlib_pipeline.cn_data.symbols import qlib_symbol_to_baostock
 from ib_qlib_pipeline.cn_data.baostock_downloader import download_baostock_daily
@@ -108,20 +112,23 @@ def main() -> None:
     metadata_path = project_root / "symbols" / "cn" / "csi800_metadata.csv"
     failed_file = project_root / "symbols" / "cn" / "failed_symbols.txt"
     symbol_map_path = _materialize_symbol_map(project_root, symbols_file)
-    start_date = args.start_date or str(data_cfg.get("start_date") or "2016-01-01")
+    full_start_date = str(data_cfg.get("start_date") or "2016-01-01")
+    download_start_date = args.start_date or full_start_date
 
     status(f"[info] config={config_path}")
     status(f"[info] symbols={symbols_file}")
     status(f"[info] raw_dir={raw_dir}")
     status(f"[info] qlib_csv_dir={qlib_csv_dir}")
     status(f"[info] qlib_bin_dir={qlib_bin_dir}")
+    status(f"[info] download_start_date={download_start_date}")
+    status(f"[info] full_export_start_date={full_start_date}")
 
     results = download_baostock_daily(
         symbol_map_path=symbol_map_path,
         raw_dir=raw_dir,
         metadata_path=metadata_path,
         failed_file=failed_file,
-        start_date=start_date,
+        start_date=download_start_date,
         end_date=args.end_date,
         adjustflag=args.adjustflag,
         sleep_seconds=args.sleep,
@@ -139,7 +146,7 @@ def main() -> None:
         out_dir=qlib_csv_dir,
         metadata_path=metadata_path,
         failed_file=failed_file,
-        start_date=start_date,
+        start_date=full_start_date,
         drop_suspended=not args.keep_suspended,
         drop_zero_volume=not args.keep_zero_volume,
         max_symbols=args.max_symbols,
