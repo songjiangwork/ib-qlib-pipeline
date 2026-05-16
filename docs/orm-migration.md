@@ -1,6 +1,9 @@
 # ORM and Migration Plan
 
-当前项目已引入 `SQLAlchemy 2.x + Alembic` 的基础骨架，用于接管后续 schema 演进。
+当前项目已经统一为：
+
+- `Alembic` 负责所有正式 schema migration
+- `init_db()` 只负责空库初始化和测试辅助
 
 ## 已完成
 
@@ -17,12 +20,17 @@
 
 ## 当前策略
 
-这一阶段只做两件事：
+当前职责边界是：
 
-1. 用 ORM 表达当前 schema
-2. 用 Alembic 接管未来 migration
+1. `init_db()`
+   - 创建全新空 SQLite 数据库
+   - 供测试快速建表
+   - 不再负责旧库升级
 
-刻意 **不** 在这一阶段重写现有所有 `sqlite3` 访问路径，以降低风险。
+2. `Alembic`
+   - 负责所有已有数据库升级
+   - 负责新增字段 / 新表 / 新索引 / 新约束
+   - 例如 universe、strategy、job worker、`job_log_lines` 这类 schema 变化
 
 ## 数据库 URL
 
@@ -50,7 +58,7 @@ pip install -r requirements.txt
 alembic current
 ```
 
-升级到最新：
+升级已有数据库到最新：
 
 ```bash
 alembic upgrade head
@@ -62,18 +70,18 @@ alembic upgrade head
 alembic revision --autogenerate -m "describe change"
 ```
 
-## 下一步建议
+## 使用规则
 
-- 先让 `alembic upgrade head` 成为部署和启动前的标准步骤
-- 之后逐步把：
-  - `model_store.py`
-  - `portfolio_store.py`
-  - `run_store.py`
-  - 部分 `service.py` 查询
-  迁移到 SQLAlchemy Session
+- 新建本地开发库：
+  - 可以通过 app/test 里的 `init_db()` 创建
+- 升级已有数据库：
+  - 必须运行 `alembic upgrade head`
+- 不要继续在 `webapi/db.py` 中添加手写 `ALTER TABLE`
+- 不要手工修改 SQLite schema
+- 新增 schema 变化时，必须添加新的 Alembic revision
 
 ## 注意
 
-- 当前 `0001_initial_schema` 是“以现有 schema 为基线”的初始版本
+- 当前 revision 链会逐步补齐历史上曾经由手写 `_migrate_schema()` 管理的字段和索引
 - 如果生产库已经存在，不要先手工删除数据库
 - 在任何较大 migration 前，继续保留 SQLite 备份习惯

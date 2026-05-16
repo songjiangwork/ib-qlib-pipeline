@@ -6,7 +6,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 
-from ..dborm.models import Job, JobStep
+from ..dborm.models import Job, JobLogLine, JobStep
 from ..dborm.session import create_session_factory_for_path
 
 
@@ -25,6 +25,12 @@ def _job_to_dict(job: Job) -> dict[str, Any]:
         "started_at": job.started_at,
         "finished_at": job.finished_at,
         "requested_by": job.requested_by,
+        "worker_id": job.worker_id,
+        "pid": job.pid,
+        "heartbeat_at": job.heartbeat_at,
+        "locked_at": job.locked_at,
+        "cancel_requested_at": job.cancel_requested_at,
+        "cancel_reason": job.cancel_reason,
         "log_output": job.log_output,
         "error_text": job.error_text,
     }
@@ -42,6 +48,18 @@ def _job_step_to_dict(step: JobStep) -> dict[str, Any]:
         "finished_at": step.finished_at,
         "log_output": step.log_output,
         "error_text": step.error_text,
+    }
+
+
+def _job_log_line_to_dict(line: JobLogLine) -> dict[str, Any]:
+    return {
+        "id": line.id,
+        "job_id": line.job_id,
+        "step_id": line.step_id,
+        "line_no": line.line_no,
+        "stream": line.stream,
+        "content": line.content,
+        "created_at": line.created_at,
     }
 
 
@@ -65,6 +83,7 @@ def get_job(db_path: Path, job_id: int) -> dict[str, Any] | None:
         ).scalars().all()
     item = _job_to_dict(job)
     item["steps"] = [_job_step_to_dict(step) for step in steps]
+    item["log_lines"] = list_job_log_lines(db_path, job_id=job_id)
     return item
 
 
@@ -193,6 +212,17 @@ def append_job_step_output(db_path: Path, *, step_id: int, line: str) -> None:
             return
         existing = step.log_output or ""
         step.log_output = f"{existing}\n{line}".strip() if existing else line
+        line_no = _next_job_log_line_no(session, job_id=step.job_id)
+        session.add(
+            JobLogLine(
+                job_id=step.job_id,
+                step_id=step.id,
+                line_no=line_no,
+                stream=None,
+                content=line,
+                created_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            )
+        )
         session.commit()
 
 
@@ -204,4 +234,33 @@ def append_job_log(db_path: Path, *, job_id: int, section_name: str, content: st
             return
         existing = job.log_output or ""
         job.log_output = f"{existing}\n\n{chunk}".strip() if existing else chunk
+        created_at = dt.datetime.now(dt.timezone.utc).isoformat()
+        for raw_line in chunk.splitlines():
+            line_no = _next_job_log_line_no(session, job_id=job_id)
+            session.add(
+                JobLogLine(
+                    job_id=job_id,
+                    step_id=None,
+                    line_no=line_no,
+                    stream=None,
+                    content=raw_line,
+                    created_at=created_at,
+                )
+            )
         session.commit()
+
+
+def list_job_log_lines(db_path: Path, *, job_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+    with _session_for_db(db_path) as session:
+        stmt = select(JobLogLine).where(JobLogLine.job_id == job_id).order_by(JobLogLine.line_no, JobLogLine.id)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = session.execute(stmt).scalars().all()
+    return [_job_log_line_to_dict(row) for row in rows]
+
+
+def _next_job_log_line_no(session, *, job_id: int) -> int:
+    max_line = session.execute(
+        select(func.coalesce(func.max(JobLogLine.line_no), 0)).where(JobLogLine.job_id == job_id)
+    ).scalar_one()
+    return int(max_line) + 1

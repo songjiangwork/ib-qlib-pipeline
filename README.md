@@ -185,6 +185,8 @@ bulk backfill 负责：
 - ORM / migration 基础设施已经就位
 - 主要 store 正在逐步迁到 ORM
 - 已有回归测试保护迁移过程
+- `init_db()` 现在只负责空库初始化和测试辅助
+- 已有数据库升级必须通过 `alembic upgrade head`
 
 相关文档：
 
@@ -225,6 +227,32 @@ cp examples/config.example.yaml config.yaml
 
 - 原始日线和 `market_daily.sqlite3` 共享复用
 - `qlib_csv / qlib_bin` 按 universe 或实验线隔离
+
+## Migration 规则
+
+当前数据库 schema 规则已经统一：
+
+- `Alembic` 是唯一正式 migration 系统
+- `init_db()` 只用于：
+  - 新建空 SQLite 数据库
+  - 测试环境快速建表
+- 不再通过 FastAPI 启动时手写 `ALTER TABLE` 升级旧库
+
+常用命令：
+
+```bash
+alembic current
+alembic upgrade head
+```
+
+以后新增：
+
+- 字段
+- 表
+- 索引
+- 约束
+
+都必须通过新的 Alembic revision 管理，不要直接修改 SQLite schema。
 
 ### A 股准备状态
 

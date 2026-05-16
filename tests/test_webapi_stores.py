@@ -19,6 +19,7 @@ from ib_qlib_pipeline.webapi.job_store import (
     create_job,
     create_job_step,
     get_job,
+    list_job_log_lines,
     list_jobs,
     mark_job_finished,
     mark_job_running,
@@ -910,11 +911,15 @@ class StoreTestCase(unittest.TestCase):
 
         jobs = list_jobs(self.db_path)
         job = get_job(self.db_path, job_id)
+        log_lines = list_job_log_lines(self.db_path, job_id=job_id)
         self.assertEqual(1, len(jobs))
         self.assertEqual("succeeded", job["status"])
         self.assertEqual(1, len(job["steps"]))
         self.assertEqual("succeeded", job["steps"][0]["status"])
         self.assertIn("[refresh_data]", job["log_output"])
+        self.assertEqual(5, len(log_lines))
+        self.assertEqual("line1", log_lines[0]["content"])
+        self.assertEqual("[refresh_data]", log_lines[2]["content"])
 
     def test_service_command_builders(self) -> None:
         service = self._make_service()

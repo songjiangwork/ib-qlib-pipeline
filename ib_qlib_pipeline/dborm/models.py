@@ -326,10 +326,17 @@ class Job(Base):
     started_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     finished_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     requested_by: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    worker_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    pid: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    heartbeat_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    locked_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cancel_requested_at: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    cancel_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     log_output: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     steps: Mapped[list["JobStep"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    log_lines: Mapped[list["JobLogLine"]] = relationship(back_populates="job", cascade="all, delete-orphan")
 
 
 class JobStep(Base):
@@ -348,6 +355,26 @@ class JobStep(Base):
     error_text: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
     job: Mapped[Job] = relationship(back_populates="steps")
+    log_lines: Mapped[list["JobLogLine"]] = relationship(back_populates="step")
+
+
+class JobLogLine(Base):
+    __tablename__ = "job_log_lines"
+    __table_args__ = (
+        Index("idx_job_log_lines_job_id", "job_id", "id"),
+        Index("idx_job_log_lines_step_id", "step_id", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False)
+    step_id: Mapped[Optional[int]] = mapped_column(ForeignKey("job_steps.id", ondelete="CASCADE"), nullable=True)
+    line_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    stream: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[str] = mapped_column(Text, nullable=False)
+
+    job: Mapped[Job] = relationship(back_populates="log_lines")
+    step: Mapped[Optional[JobStep]] = relationship(back_populates="log_lines")
 
 
 class PriceDaily(Base):
