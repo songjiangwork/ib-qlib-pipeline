@@ -170,6 +170,7 @@ class Run(Base):
     signal_date: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     ranking_csv_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     html_report_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    manifest_path: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     experiment_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     recorder_id: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     row_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)

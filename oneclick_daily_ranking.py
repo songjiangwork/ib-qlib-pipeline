@@ -16,6 +16,7 @@ def parse_args() -> argparse.Namespace:
         default="examples/workflow_us_lgb_2020_port.yaml",
         help="Base workflow yaml path",
     )
+    parser.add_argument("--manifest-path", default=None, help="Optional manifest JSON output path")
     return parser.parse_args()
 
 
@@ -28,6 +29,7 @@ def main() -> None:
             client_id=args.client_id,
             lookback_days=args.lookback_days,
             workflow_base=args.workflow_base,
+            manifest_path=Path(args.manifest_path).resolve() if args.manifest_path else None,
         )
     )
     runner.run()

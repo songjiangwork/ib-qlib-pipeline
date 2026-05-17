@@ -14,6 +14,7 @@ from ib_qlib_pipeline.ranking.ranking_loader import (
 from ib_qlib_pipeline.reporting.company_enricher import fetch_topn_company_data
 from ib_qlib_pipeline.reporting.html_report import build_html_report
 from ib_qlib_pipeline.runner.common import log, run_cmd
+from ib_qlib_pipeline.runner.manifest import build_run_artifact_manifest
 from ib_qlib_pipeline.runner.qlib_runner import run_qlib_workflow
 from ib_qlib_pipeline.runner.runtime_workflow import build_daily_runtime_workflow, load_base_workflow
 
@@ -24,6 +25,7 @@ class DailyRankingRunRequest:
     client_id: int
     lookback_days: int
     workflow_base: str
+    manifest_path: Path | None = None
 
 
 class DailyRankingRunner:
@@ -88,6 +90,35 @@ class DailyRankingRunner:
         html_path = csv_path.with_name(f"sp500_ranking_{run_date_str}_{html_stamp}.html")
         build_html_report(ranking_df, topn_details, html_path, self.console_lines)
         log(f"[ok] html report exported: {html_path}", self.console_lines)
+        manifest, manifest_path = build_run_artifact_manifest(
+            project_root=self.project_root,
+            manifest_path=self.request.manifest_path,
+            job_type="daily_ranking",
+            status="succeeded",
+            signal_date=run_date_str,
+            start_date=run_date_str,
+            end_date=run_date_str,
+            ranking_csv_path=csv_path,
+            html_report_path=html_path,
+            experiment_name=experiment_name,
+            experiment_id=exp_id,
+            recorder_id=rec_id,
+            pred_path=pred_path,
+            workflow_base=self.request.workflow_base,
+            runtime_workflow_path=runtime_wf,
+            config_path=self.project_root / "config.yaml",
+            qlib_csv_dir=self.runtime_cfg.qlib_csv_dir,
+            qlib_bin_dir=self.runtime_cfg.qlib_bin_dir,
+            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            extra={
+                "client_id": self.request.client_id,
+                "lookback_days": self.request.lookback_days,
+                "latest_trade_date": latest_trade_date.isoformat(),
+                "backtest_end": backtest_end.isoformat(),
+            },
+        )
+        manifest.write_json(manifest_path)
+        log(f"[ok] manifest exported: {manifest_path}", self.console_lines)
         return {
             "runtime_workflow": runtime_wf,
             "experiment_name": experiment_name,
@@ -96,6 +127,7 @@ class DailyRankingRunner:
             "recorder_id": rec_id,
             "ranking_csv_path": csv_path,
             "html_report_path": html_path,
+            "manifest_path": manifest_path,
         }
 
     def _build_runtime_workflow(self, today: dt.date) -> tuple[Path, str, dt.date, dt.date]:

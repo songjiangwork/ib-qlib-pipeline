@@ -18,6 +18,7 @@ from ib_qlib_pipeline.ranking.ranking_loader import (
 from ib_qlib_pipeline.reporting.company_enricher import cached_topn_details, fetch_topn_company_data
 from ib_qlib_pipeline.reporting.html_report import build_html_report
 from ib_qlib_pipeline.runner.common import log
+from ib_qlib_pipeline.runner.manifest import build_manifest_path, build_run_artifact_manifest
 from ib_qlib_pipeline.runner.qlib_runner import run_qlib_workflow
 from ib_qlib_pipeline.runner.runtime_workflow import build_bulk_backfill_runtime_workflow, load_base_workflow
 from ib_qlib_pipeline.webapi.db import init_db
@@ -43,6 +44,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model-id", type=int, default=None, help="Model reference id in SQLite; defaults to workflow-derived model")
     parser.add_argument("--skip-existing-db", action="store_true", help="Skip dates that already exist in the runs table")
     parser.add_argument("--skip-existing-files", action="store_true", help="Skip dates whose CSV already exists under reports/rankings")
+    parser.add_argument("--manifest-dir", default="reports/manifests", help="Directory for per-signal manifest JSON files")
     parser.add_argument("--max-days", type=int, default=None, help="Optional limit on number of trading days to process")
     parser.add_argument(
         "--html-mode",
@@ -184,6 +186,8 @@ def main() -> None:
         qlib_csv_dir=runtime_cfg.qlib_csv_dir,
     )
     log(f"[ok] close cache loaded entries={len(close_cache)} symbols={len(symbols)} dates={len(pending_days)}", console_lines)
+    manifest_root = (project_root / args.manifest_dir).resolve()
+    manifest_stamp = dt.datetime.now(dt.timezone.utc)
 
     for index, trade_date in enumerate(pending_days, start=1):
         trade_date_str = trade_date.isoformat()
@@ -215,6 +219,65 @@ def main() -> None:
         )
         build_html_report(ranking_df, topn_details, html_path, day_console_lines)
         log(f"[ok] html report exported: {html_path}", day_console_lines)
+        manifest_obj, manifest_path = build_run_artifact_manifest(
+            project_root=project_root,
+            manifest_path=build_manifest_path(
+                project_root,
+                job_type="backfill",
+                model_key=str(model["key"]),
+                date_token=trade_date_str,
+                created_at=manifest_stamp,
+            ).resolve()
+            if args.manifest_dir == "reports/manifests"
+            else (
+                manifest_root
+                / build_manifest_path(
+                    project_root,
+                    job_type="backfill",
+                    model_key=str(model["key"]),
+                    date_token=trade_date_str,
+                    created_at=manifest_stamp,
+                ).name
+            ),
+            job_type="backfill_ranking",
+            status="succeeded",
+            model_id=int(model["id"]),
+            model_key=str(model["key"]),
+            model_name=str(model["name"]),
+            universe_id=int(model["universe_id"]) if model.get("universe_id") is not None else None,
+            universe_key=str(model["universe_key"]) if model.get("universe_key") else None,
+            signal_date=trade_date_str,
+            start_date=trade_date_str,
+            end_date=trade_date_str,
+            ranking_csv_path=csv_path,
+            html_report_path=html_path,
+            experiment_name=experiment_name,
+            experiment_id=exp_id,
+            recorder_id=rec_id,
+            pred_path=pred_path,
+            workflow_base=args.workflow_base,
+            runtime_workflow_path=runtime_wf,
+            config_path=config_path,
+            qlib_csv_dir=runtime_cfg.qlib_csv_dir,
+            qlib_bin_dir=runtime_cfg.qlib_bin_dir,
+            created_at=dt.datetime.combine(trade_date, dt.time(16, 0, tzinfo=dt.timezone.utc)).isoformat(),
+            finished_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+            extra={
+                "backfill_mode": "bulk",
+                "bulk_start_date": bulk_start.isoformat(),
+                "bulk_end_date": bulk_end.isoformat(),
+                "backtest_end": backtest_end.isoformat(),
+                "html_mode": args.html_mode,
+                "row_count": len(ranking_df),
+                "missing_close": int(ranking_df["close"].isna().sum()),
+            },
+        )
+        manifest_obj.write_json(manifest_path)
+        log(f"[ok] manifest exported: {manifest_path}", day_console_lines)
+        try:
+            manifest_path_for_db = manifest_path.resolve().relative_to(project_root.resolve())
+        except ValueError:
+            manifest_path_for_db = manifest_path.resolve()
 
         timestamp = dt.datetime.combine(trade_date, dt.time(16, 0, tzinfo=dt.timezone.utc)).isoformat()
         run_id = insert_completed_run(
@@ -232,6 +295,7 @@ def main() -> None:
             ranking_df=ranking_df,
             ranking_csv_path=csv_path,
             html_report_path=html_path,
+            manifest_path=manifest_path_for_db,
             experiment_id=exp_id,
             recorder_id=rec_id,
             log_output="\n".join(day_console_lines),

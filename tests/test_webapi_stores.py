@@ -124,6 +124,7 @@ class StoreTestCase(unittest.TestCase):
             ranking_df=self._ranking_df(signal_date),
             ranking_csv_path=Path("reports/r.csv"),
             html_report_path=Path("reports/r.html"),
+            manifest_path=Path("reports/manifests/r.json"),
             experiment_id="exp1",
             recorder_id="rec1",
             log_output="ok",
@@ -385,6 +386,8 @@ class StoreTestCase(unittest.TestCase):
     def test_run_store_insert_completed_run(self) -> None:
         run_id = self._insert_completed_run()
         self.assertGreater(run_id, 0)
+        run = self._make_service().get_run(run_id)
+        self.assertEqual("reports/manifests/r.json", run["manifest_path"])
 
     def test_service_run_queries(self) -> None:
         service = self._make_service()
@@ -402,6 +405,7 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(first_run_id, succeeded_0505[0]["id"])
         self.assertEqual("XGBoost_Default", run["model_name"])
         self.assertEqual("xgb", run["model_key"])
+        self.assertEqual("reports/manifests/r.json", run["manifest_path"])
         self.assertEqual(1, len(recs))
         self.assertEqual("AAPL", recs[0]["symbol"])
 
@@ -895,6 +899,7 @@ class StoreTestCase(unittest.TestCase):
         self.assertNotIn("--skip-existing-files", backfill)
         self.assertEqual("backfill_rankings_bulk.py", bulk_backfill[1])
         self.assertIn("--skip-existing-db", bulk_backfill)
+        self.assertIn("--manifest-dir", bulk_backfill)
         self.assertNotIn("--skip-existing-files", bulk_backfill)
         self.assertEqual("2026-05-06", backfill[backfill.index("--start-date") + 1])
         self.assertEqual("2026-05-06", backfill[backfill.index("--end-date") + 1])

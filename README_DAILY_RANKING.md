@@ -30,6 +30,7 @@
 5. 仅定位“本次新 experiment / 新 recorder”的 `pred.pkl`
 6. 读取最新 `signal_date` 的横截面预测
 7. 生成 ranking CSV / HTML
+8. 写结构化 manifest JSON 到 `reports/manifests/`
 
 注意：
 
@@ -60,6 +61,8 @@ cd /home/song/projects/ib-qlib-pipeline
   - `reports/rankings/sp500_ranking_YYYY-MM-DD.csv`
 - html report:
   - `reports/rankings/*.html`
+- manifest:
+  - `reports/manifests/daily_ranking_*.json`
 
 ## 预测 artifact 定位
 

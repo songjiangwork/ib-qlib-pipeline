@@ -43,6 +43,7 @@ class DbBootstrapTestCase(unittest.TestCase):
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         self.assertIn("model_id", run_columns)
         self.assertIn("universe_id", run_columns)
+        self.assertIn("manifest_path", run_columns)
 
         strategy_columns = {column["name"] for column in inspector.get_columns("strategies")}
         self.assertIn("max_position_notional", strategy_columns)
@@ -105,6 +106,7 @@ class DbBootstrapTestCase(unittest.TestCase):
         run_columns = {column["name"] for column in inspector.get_columns("runs")}
         self.assertIn("model_id", run_columns)
         self.assertIn("universe_id", run_columns)
+        self.assertIn("manifest_path", run_columns)
 
         portfolio_run_columns = {column["name"] for column in inspector.get_columns("portfolio_runs")}
         self.assertIn("strategy_id", portfolio_run_columns)
@@ -127,11 +129,17 @@ class DbBootstrapTestCase(unittest.TestCase):
         self.assertIn("idx_job_log_lines_job_id", indexes)
         self.assertIn("idx_job_log_lines_step_id", indexes)
 
-    def test_consolidation_revision_exists(self) -> None:
-        revision_path = Path(__file__).resolve().parent.parent / "alembic" / "versions" / "0003_consolidate_webapi_schema.py"
+    def test_revision_chain_includes_manifest_migration(self) -> None:
+        versions_dir = Path(__file__).resolve().parent.parent / "alembic" / "versions"
+        revision_path = versions_dir / "0003_consolidate_webapi_schema.py"
         self.assertTrue(revision_path.exists())
         content = revision_path.read_text(encoding="utf-8")
         self.assertIn("job_log_lines", content)
         self.assertIn("worker_id", content)
         self.assertIn("universes", content)
         self.assertIn("strategies", content)
+
+        manifest_revision = versions_dir / "0004_run_manifest_path.py"
+        self.assertTrue(manifest_revision.exists())
+        manifest_content = manifest_revision.read_text(encoding="utf-8")
+        self.assertIn("manifest_path", manifest_content)

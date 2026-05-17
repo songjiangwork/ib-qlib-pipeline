@@ -42,6 +42,7 @@ def insert_completed_run(
     ranking_df: pd.DataFrame,
     ranking_csv_path: Path,
     html_report_path: Path | None,
+    manifest_path: Path | None,
     experiment_id: str,
     recorder_id: str,
     log_output: str,
@@ -77,6 +78,7 @@ def insert_completed_run(
             signal_date=signal_date,
             ranking_csv_path=str(ranking_csv_path),
             html_report_path=str(html_report_path) if html_report_path is not None else None,
+            manifest_path=str(manifest_path) if manifest_path is not None else None,
             experiment_id=experiment_id,
             recorder_id=recorder_id,
             row_count=len(recommendations),
@@ -173,6 +175,7 @@ def finalize_succeeded_run(
     signal_date: str,
     ranking_csv_path: str,
     html_report_path: str | None,
+    manifest_path: str | None,
     experiment_id: str,
     recorder_id: str,
     log_output: str,
@@ -191,6 +194,7 @@ def finalize_succeeded_run(
         run.signal_date = signal_date
         run.ranking_csv_path = ranking_csv_path
         run.html_report_path = html_report_path
+        run.manifest_path = manifest_path
         run.experiment_id = experiment_id
         run.recorder_id = recorder_id
         run.row_count = len(recommendations)
@@ -268,6 +272,7 @@ def list_runs(
                 "signal_date": run.signal_date,
                 "ranking_csv_path": run.ranking_csv_path,
                 "html_report_path": run.html_report_path,
+                "manifest_path": run.manifest_path,
                 "experiment_id": run.experiment_id,
                 "recorder_id": run.recorder_id,
                 "row_count": run.row_count,
@@ -328,6 +333,7 @@ def get_run(db_path: Path, run_id: int) -> dict[str, Any] | None:
             "signal_date": run.signal_date,
             "ranking_csv_path": run.ranking_csv_path,
             "html_report_path": run.html_report_path,
+            "manifest_path": run.manifest_path,
             "experiment_id": run.experiment_id,
             "recorder_id": run.recorder_id,
             "row_count": run.row_count,

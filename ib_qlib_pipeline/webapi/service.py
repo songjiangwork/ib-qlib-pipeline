@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import re
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -24,15 +23,12 @@ from .portfolio_store import list_portfolio_runs, latest_portfolio_run_for_model
 from .run_store import (
     backfill_legacy_run_models as backfill_legacy_run_models_record,
     create_queued_run,
-    finalize_succeeded_run,
     get_run as get_run_record,
     get_run_recommendations as get_run_recommendation_records,
     latest_backfill_signal_date_for_model,
     list_ranking_dates as list_ranking_date_records,
     list_runs as list_run_records,
-    mark_run_running,
     mark_run_failed as mark_run_failed_record,
-    ranking_df_to_rows,
 )
 from .schedule_store import (
     create_schedule as create_schedule_record,
@@ -540,6 +536,8 @@ class RankingBackendService:
             "--html-mode",
             "cached",
             "--skip-existing-db",
+            "--manifest-dir",
+            "reports/manifests",
         ]
 
     def _config_path_for_model(self, model: dict[str, Any]) -> str:
@@ -643,19 +641,3 @@ class RankingBackendService:
                 updated_at=finished_at,
                 last_run_status="failed",
             )
-
-    def _parse_run_output(self, output: str) -> dict[str, str]:
-        patterns = {
-            "ranking_csv_path": r"\[ok\] ranking exported: (.+)",
-            "html_report_path": r"\[ok\] html report exported: (.+)",
-            "signal_date": r"\[ok\] signal_date=(\d{4}-\d{2}-\d{2})",
-            "experiment_id": r"\[ok\] experiment_id=([^\s]+)",
-            "recorder_id": r"recorder_id=([^\s]+)",
-        }
-        parsed: dict[str, str] = {}
-        for key, pattern in patterns.items():
-            match = re.search(pattern, output)
-            if match is None:
-                raise RuntimeError(f"Could not parse {key} from ranking output")
-            parsed[key] = match.group(1).strip()
-        return parsed

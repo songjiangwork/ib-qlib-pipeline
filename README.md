@@ -86,7 +86,10 @@ bulk backfill 负责：
 - 从本次唯一 experiment / recorder 读取一次 `pred.pkl`
 - 再按多个 `signal_date` 切分并导出 ranking
 - 生成 ranking CSV / HTML
+- 为每个成功 run 写结构化 manifest：`reports/manifests/*.json`
 - 写 SQLite `runs` / `recommendations`
+
+后端现在以 manifest JSON 作为机器接口来识别 artifact，不再依赖 console log regex。
 
 ### 3. Portfolio 回放
 

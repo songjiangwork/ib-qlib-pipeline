@@ -3,7 +3,6 @@ from __future__ import annotations
 import datetime as dt
 import json
 import os
-import re
 import select
 import signal
 import subprocess
@@ -12,6 +11,7 @@ from typing import Any
 
 import pandas as pd
 
+from ..runner.manifest import RunArtifactManifest, build_manifest_path
 from ..ranking.ranking_loader import read_available_trading_days
 from .job_store import (
     append_job_log,
@@ -79,6 +79,7 @@ class JobExecutor:
             lookback_days=lookback_days,
             workflow_base=workflow_base,
         )
+        manifest_path = self._build_daily_ranking_manifest_path(run_id)
         command = [
             str(self.settings.run_script_path),
             "--client-id",
@@ -87,9 +88,11 @@ class JobExecutor:
             str(lookback_days),
             "--workflow-base",
             workflow_base,
+            "--manifest-path",
+            str(manifest_path),
         ]
         combined_output = self.execute_step(job_id, "ranking_run", command)
-        self._finalize_run_from_output(run_id, schedule_id, combined_output)
+        self._finalize_run_from_manifest(run_id, schedule_id, manifest_path, combined_output)
 
     def execute_refresh_data_job(self, job_id: int, payload: dict[str, Any]) -> None:
         config_path = str(payload.get("config_path") or "config.yaml")
@@ -397,19 +400,31 @@ class JobExecutor:
             )
         return run_id
 
-    def _finalize_run_from_output(self, run_id: int, schedule_id: int | None, combined_output: str) -> None:
-        artifacts = self._parse_run_output(combined_output)
-        ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
+    def _finalize_run_from_manifest(
+        self,
+        run_id: int,
+        schedule_id: int | None,
+        manifest_path: Path,
+        combined_output: str,
+    ) -> None:
+        manifest = self._load_manifest(manifest_path)
+        ranking_csv_path = self.settings.project_root / manifest.ranking_csv_path
+        try:
+            manifest_path_text = str(manifest_path.resolve().relative_to(self.settings.project_root.resolve()))
+        except ValueError:
+            manifest_path_text = str(manifest_path.resolve())
+        ranking_df = pd.read_csv(ranking_csv_path)
         finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
         finalize_succeeded_run(
             db_path=self.settings.db_path,
             run_id=run_id,
             ranking_df=ranking_df,
-            signal_date=artifacts["signal_date"],
-            ranking_csv_path=artifacts["ranking_csv_path"],
-            html_report_path=artifacts["html_report_path"],
-            experiment_id=artifacts["experiment_id"],
-            recorder_id=artifacts["recorder_id"],
+            signal_date=str(manifest.signal_date),
+            ranking_csv_path=str(manifest.ranking_csv_path),
+            html_report_path=str(manifest.html_report_path) if manifest.html_report_path is not None else None,
+            manifest_path=manifest_path_text,
+            experiment_id=str(manifest.experiment_id),
+            recorder_id=str(manifest.recorder_id),
             log_output=combined_output,
             finished_at=finished_at,
         )
@@ -506,6 +521,8 @@ class JobExecutor:
             "--html-mode",
             "cached",
             "--skip-existing-db",
+            "--manifest-dir",
+            "reports/manifests",
         ]
 
     def _config_path_for_model(self, model: dict[str, Any]) -> str:
@@ -599,18 +616,24 @@ class JobExecutor:
                 last_run_status="failed",
             )
 
-    def _parse_run_output(self, output: str) -> dict[str, str]:
-        patterns = {
-            "ranking_csv_path": r"\[ok\] ranking exported: (.+)",
-            "html_report_path": r"\[ok\] html report exported: (.+)",
-            "signal_date": r"\[ok\] signal_date=(\d{4}-\d{2}-\d{2})",
-            "experiment_id": r"\[ok\] experiment_id=([^\s]+)",
-            "recorder_id": r"recorder_id=([^\s]+)",
-        }
-        parsed: dict[str, str] = {}
-        for key, pattern in patterns.items():
-            match = re.search(pattern, output)
-            if match is None:
-                raise RuntimeError(f"Could not parse {key} from ranking output")
-            parsed[key] = match.group(1).strip()
-        return parsed
+    def _build_daily_ranking_manifest_path(self, run_id: int) -> Path:
+        return build_manifest_path(
+            self.settings.project_root,
+            job_type="daily_ranking",
+            model_key=f"run_{run_id}",
+            created_at=dt.datetime.now(dt.timezone.utc),
+        )
+
+    def _load_manifest(self, manifest_path: Path) -> RunArtifactManifest:
+        if not manifest_path.exists():
+            raise RuntimeError(f"Missing manifest JSON: {manifest_path}")
+        manifest = RunArtifactManifest.read_json(manifest_path)
+        if manifest.status != "succeeded":
+            raise RuntimeError(f"Manifest status is not succeeded: {manifest.status}")
+        if not manifest.ranking_csv_path:
+            raise RuntimeError("Manifest missing ranking_csv_path")
+        if not manifest.signal_date:
+            raise RuntimeError("Manifest missing signal_date")
+        if not manifest.experiment_id or not manifest.recorder_id:
+            raise RuntimeError("Manifest missing experiment_id/recorder_id")
+        return manifest
