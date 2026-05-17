@@ -4,7 +4,7 @@ import datetime as dt
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from ..dborm.models import Job, JobLogLine, JobStep
 from ..dborm.session import create_session_factory_for_path
@@ -83,7 +83,7 @@ def get_job(db_path: Path, job_id: int) -> dict[str, Any] | None:
         ).scalars().all()
     item = _job_to_dict(job)
     item["steps"] = [_job_step_to_dict(step) for step in steps]
-    item["log_lines"] = list_job_log_lines(db_path, job_id=job_id)
+    item["log_lines"] = list_job_log_lines(db_path, job_id=job_id)["lines"]
     return item
 
 
@@ -121,6 +121,172 @@ def mark_job_running(db_path: Path, job_id: int, started_at: str | None = None) 
         job.status = "running"
         job.started_at = started_at
         session.commit()
+
+
+def claim_next_queued_job(
+    db_path: Path,
+    *,
+    worker_id: str,
+    pid: int,
+    now: str | None = None,
+) -> dict[str, Any] | None:
+    now = now or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        queued = session.execute(
+            select(Job)
+            .where(Job.status == "queued")
+            .order_by(Job.created_at.asc(), Job.id.asc())
+            .limit(1)
+        ).scalar_one_or_none()
+        if queued is None:
+            return None
+        result = session.execute(
+            update(Job)
+            .where(Job.id == queued.id, Job.status == "queued")
+            .values(
+                status="running",
+                worker_id=worker_id,
+                pid=pid,
+                locked_at=now,
+                heartbeat_at=now,
+                started_at=now,
+            )
+        )
+        if (result.rowcount or 0) != 1:
+            session.rollback()
+            return None
+        session.commit()
+        job = session.get(Job, queued.id)
+        assert job is not None
+        return _job_to_dict(job)
+
+
+def update_job_heartbeat(db_path: Path, job_id: int, *, worker_id: str, now: str | None = None) -> None:
+    now = now or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.worker_id == worker_id, Job.status.in_(["running", "cancel_requested"]))
+            .values(heartbeat_at=now)
+        )
+        session.commit()
+
+
+def request_cancel_job(
+    db_path: Path,
+    job_id: int,
+    *,
+    reason: str,
+    now: str | None = None,
+) -> dict[str, Any] | None:
+    now = now or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        job = session.get(Job, job_id)
+        if job is None:
+            return None
+        if job.status == "queued":
+            job.status = "canceled"
+            job.finished_at = now
+            job.cancel_reason = reason
+        elif job.status == "running":
+            job.status = "cancel_requested"
+            job.cancel_requested_at = now
+            job.cancel_reason = reason
+        elif job.status == "cancel_requested":
+            if not job.cancel_requested_at:
+                job.cancel_requested_at = now
+            if not job.cancel_reason:
+                job.cancel_reason = reason
+        session.commit()
+        return _job_to_dict(job)
+
+
+def is_cancel_requested(db_path: Path, job_id: int) -> bool:
+    with _session_for_db(db_path) as session:
+        job = session.get(Job, job_id)
+        return bool(job and job.status == "cancel_requested")
+
+
+def mark_job_canceled(
+    db_path: Path,
+    job_id: int,
+    *,
+    worker_id: str,
+    finished_at: str | None = None,
+    reason: str | None = None,
+) -> None:
+    finished_at = finished_at or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.worker_id == worker_id, Job.status.in_(["running", "cancel_requested"]))
+            .values(status="canceled", finished_at=finished_at, cancel_reason=reason)
+        )
+        session.commit()
+
+
+def mark_job_failed_by_worker(
+    db_path: Path,
+    job_id: int,
+    *,
+    worker_id: str,
+    finished_at: str | None = None,
+    error_text: str | None = None,
+) -> None:
+    finished_at = finished_at or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.worker_id == worker_id, Job.status.in_(["running", "cancel_requested"]))
+            .values(status="failed", finished_at=finished_at, error_text=error_text)
+        )
+        session.commit()
+
+
+def mark_job_succeeded_by_worker(
+    db_path: Path,
+    job_id: int,
+    *,
+    worker_id: str,
+    finished_at: str | None = None,
+) -> None:
+    finished_at = finished_at or dt.datetime.now(dt.timezone.utc).isoformat()
+    with _session_for_db(db_path) as session:
+        session.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.worker_id == worker_id, Job.status.in_(["running", "cancel_requested"]))
+            .values(status="succeeded", finished_at=finished_at, error_text=None)
+        )
+        session.commit()
+
+
+def recover_stale_jobs(
+    db_path: Path,
+    *,
+    stale_before: str,
+    now: str | None = None,
+) -> int:
+    now = now or dt.datetime.now(dt.timezone.utc).isoformat()
+    recovered = 0
+    with _session_for_db(db_path) as session:
+        running_jobs = session.execute(
+            select(Job).where(
+                Job.status.in_(["running", "cancel_requested"]),
+                Job.heartbeat_at.is_not(None),
+                Job.heartbeat_at < stale_before,
+            )
+        ).scalars().all()
+        for job in running_jobs:
+            if job.status == "running":
+                job.status = "failed"
+                job.finished_at = now
+                job.error_text = f"Recovered stale job: heartbeat older than {stale_before}"
+            else:
+                job.status = "canceled"
+                job.finished_at = now
+            recovered += 1
+        session.commit()
+    return recovered
 
 
 def mark_job_finished(
@@ -250,13 +416,51 @@ def append_job_log(db_path: Path, *, job_id: int, section_name: str, content: st
         session.commit()
 
 
-def list_job_log_lines(db_path: Path, *, job_id: int, limit: int | None = None) -> list[dict[str, Any]]:
+def append_job_log_line(
+    db_path: Path,
+    *,
+    job_id: int,
+    step_id: int | None,
+    content: str,
+    stream: str | None = "stdout",
+    created_at: str | None = None,
+) -> int:
+    created_at = created_at or dt.datetime.now(dt.timezone.utc).isoformat()
     with _session_for_db(db_path) as session:
-        stmt = select(JobLogLine).where(JobLogLine.job_id == job_id).order_by(JobLogLine.line_no, JobLogLine.id)
+        line_no = _next_job_log_line_no(session, job_id=job_id)
+        row = JobLogLine(
+            job_id=job_id,
+            step_id=step_id,
+            line_no=line_no,
+            stream=stream,
+            content=content,
+            created_at=created_at,
+        )
+        session.add(row)
+        session.commit()
+        session.refresh(row)
+        return int(row.id)
+
+
+def list_job_log_lines(
+    db_path: Path,
+    *,
+    job_id: int,
+    after_id: int = 0,
+    limit: int | None = None,
+) -> dict[str, Any]:
+    with _session_for_db(db_path) as session:
+        stmt = (
+            select(JobLogLine)
+            .where(JobLogLine.job_id == job_id, JobLogLine.id > after_id)
+            .order_by(JobLogLine.line_no, JobLogLine.id)
+        )
         if limit is not None:
             stmt = stmt.limit(limit)
         rows = session.execute(stmt).scalars().all()
-    return [_job_log_line_to_dict(row) for row in rows]
+    payload = [_job_log_line_to_dict(row) for row in rows]
+    next_after_id = after_id if not payload else int(payload[-1]["id"])
+    return {"job_id": job_id, "lines": payload, "next_after_id": next_after_id}
 
 
 def _next_job_log_line_no(session, *, job_id: int) -> int:

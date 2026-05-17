@@ -239,7 +239,11 @@
           <button type="button" class="item-card" [class.active]="state.selectedJobId() === job.id" (click)="openJob(job.id)">
             <strong>#{{ job.id }} {{ job.title }}</strong>
             <span>{{ job.job_type }}</span>
-            <span class="status" [class.running]="job.status === 'running' || job.status === 'queued'" [class.failed]="job.status === 'failed'">
+            <span
+              class="status"
+              [class.running]="job.status === 'running' || job.status === 'queued' || job.status === 'cancel_requested'"
+              [class.failed]="job.status === 'failed' || job.status === 'canceled'"
+            >
               {{ job.status }}
             </span>
           </button>
@@ -250,7 +254,10 @@
     <section class="panel">
       <div class="panel-head">
         <h3>{{ i18n.t('jobDetail') }}</h3>
-        @if (state.selectedJobDetail()?.status === 'failed') {
+        @if (canCancelSelectedJob()) {
+          <button type="button" class="secondary danger" (click)="cancelSelectedJob()">{{ i18n.t('cancel') }}</button>
+        }
+        @if (canRetrySelectedJob()) {
           <button type="button" class="secondary" (click)="retrySelectedJob()">{{ i18n.t('retryJob') }}</button>
         }
       </div>
@@ -265,7 +272,11 @@
             <article class="step" [class.active-step]="isActiveStep(step.status, step.step_order)">
               <div class="step-head">
                 <strong>{{ step.step_order }}. {{ step.step_name }}</strong>
-                <span class="status" [class.running]="step.status === 'running' || step.status === 'queued'" [class.failed]="step.status === 'failed'">
+                <span
+                  class="status"
+                  [class.running]="step.status === 'running' || step.status === 'queued' || step.status === 'cancel_requested'"
+                  [class.failed]="step.status === 'failed' || step.status === 'canceled'"
+                >
                   {{ step.status }}
                 </span>
               </div>

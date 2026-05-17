@@ -294,7 +294,7 @@ alembic upgrade head
 - Windows 防火墙需放行前后端端口
 - 在 WSL 环境中通常还需要 `portproxy`
 
-## 启动后端
+## 启动后端与 Worker
 
 开发方式：
 
@@ -304,18 +304,51 @@ source .venv/bin/activate
 python run_backend.py
 ```
 
+Worker 开发方式：
+
+```bash
+cd /home/song/projects/ib-qlib-pipeline
+source .venv/bin/activate
+python -m ib_qlib_pipeline.webapi.worker
+```
+
 脚本方式：
 
 ```bash
 cd /home/song/projects/ib-qlib-pipeline
 RANKING_API_PORT=8001 ./start_backend.sh
 ./stop_backend.sh
+./start_worker.sh
+./stop_worker.sh
+```
+
+注意：
+
+- `start_backend.sh` 只启动 FastAPI 后端，不会自动拉起 worker
+- `Operations` 里的 job 进入 `Queued` 后，必须有 worker 在运行才会开始执行
+- 更新代码后，如果包含 schema 变化，先运行：
+
+```bash
+source .venv/bin/activate
+alembic upgrade head
 ```
 
 常用地址：
 
 - API: `http://127.0.0.1:8001`
 - Docs: `http://127.0.0.1:8001/docs`
+
+当前作业执行架构：
+
+- FastAPI 后端只负责：
+  - 入队 job
+  - 查询 job / log
+  - cancel / retry
+- 独立 worker 进程负责：
+  - claim queued jobs
+  - 执行 subprocess
+  - heartbeat / stale recovery
+  - 逐行写入 `job_log_lines`
 
 ## 启动前端
 
@@ -350,7 +383,7 @@ FRONTEND_BACKEND_PORT=8001 ./start_frontend.sh
 
 ### 手动跑当天流程
 
-1. 启动前后端
+1. 启动 backend、worker、前端
 2. 打开 `/operations`
 3. 点击 `Daily Close Pipeline`
 

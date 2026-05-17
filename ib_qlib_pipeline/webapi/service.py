@@ -2,30 +2,21 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-import os
 import re
-import subprocess
-import threading
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-import pandas as pd
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from .db import init_db
 from .job_store import (
-    append_job_log,
-    append_job_step_output,
     create_job as create_job_record,
-    create_job_step,
     get_job as get_job_record,
+    list_job_log_lines as list_job_log_line_records,
     list_jobs as list_job_records,
-    mark_job_finished,
-    mark_job_running,
-    next_job_step_order,
-    update_job_step,
+    request_cancel_job,
 )
 from .model_store import ensure_default_models, get_model, list_models, resolve_or_create_model_for_workflow
 from .operations_service import build_operations_summary, build_scheduled_job_request
@@ -85,7 +76,6 @@ class NotFoundError(RuntimeError):
 class RankingBackendService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self._run_lock = threading.Lock()
         self._scheduler = BackgroundScheduler(timezone=settings.timezone)
         init_db(settings.db_path)
         ensure_default_universes(settings.db_path, settings.project_root)
@@ -214,6 +204,12 @@ class RankingBackendService:
             raise NotFoundError(f"Job {job_id} not found")
         return item
 
+    def list_job_log_lines(self, job_id: int, *, after_id: int = 0, limit: int = 500) -> dict[str, Any]:
+        item = get_job_record(self.settings.db_path, job_id)
+        if item is None:
+            raise NotFoundError(f"Job {job_id} not found")
+        return list_job_log_line_records(self.settings.db_path, job_id=job_id, after_id=after_id, limit=limit)
+
     def retry_job(self, job_id: int) -> dict[str, Any]:
         job = self.get_job(job_id)
         payload = json.loads(job.get("payload_json") or "{}")
@@ -227,22 +223,31 @@ class RankingBackendService:
         if job_type == "daily_close_pipeline":
             return self.trigger_daily_close_pipeline_job(payload)
         if job_type == "scheduled_daily_close_pipeline":
-            return self._start_job(
+            return self._enqueue_job(
                 job_type=job_type,
                 title=str(job["title"]),
                 payload=payload,
-                target=self._execute_daily_close_pipeline_job,
                 schedule_id=int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None,
             )
         if job_type in {"manual_ranking_run", "scheduled_ranking_run"}:
-            return self._start_job(
+            return self._enqueue_job(
                 job_type=job_type,
                 title=str(job["title"]),
                 payload=payload,
-                target=self._execute_ranking_run_job,
                 schedule_id=int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None,
             )
         raise RuntimeError(f"Retry not supported for job_type={job_type}")
+
+    def cancel_job(self, job_id: int, reason: str = "user requested") -> dict[str, Any]:
+        item = request_cancel_job(
+            self.settings.db_path,
+            job_id,
+            reason=reason,
+            now=dt.datetime.now(dt.timezone.utc).isoformat(),
+        )
+        if item is None:
+            raise NotFoundError(f"Job {job_id} not found")
+        return item
 
     def list_ranking_dates(
         self,
@@ -270,7 +275,7 @@ class RankingBackendService:
         return get_run_recommendation_records(self.settings.db_path, run_id)
 
     def trigger_manual_run(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_job(
+        return self._enqueue_job(
             job_type="manual_ranking_run",
             title=f"Manual ranking run ({payload['workflow_base']})",
             payload={
@@ -280,42 +285,37 @@ class RankingBackendService:
                 "lookback_days": int(payload["lookback_days"]),
                 "workflow_base": str(payload["workflow_base"]),
             },
-            target=self._execute_ranking_run_job,
         )
 
     def trigger_data_refresh_job(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_job(
+        return self._enqueue_job(
             job_type="refresh_data",
             title=f"Refresh market data from {payload['start_date']}",
             payload=payload,
-            target=self._execute_refresh_data_job,
         )
 
     def trigger_backfill_job(self, payload: dict[str, Any]) -> dict[str, Any]:
         model = get_model(self.settings.db_path, int(payload["model_id"]))
         if model is None:
             raise NotFoundError(f"Model {payload['model_id']} not found")
-        return self._start_job(
+        return self._enqueue_job(
             job_type="backfill_ranking",
             title=f"Backfill {model['name']} ranking for {payload['signal_date']}",
             payload=payload,
-            target=self._execute_backfill_job,
         )
 
     def trigger_append_portfolio_job(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_job(
+        return self._enqueue_job(
             job_type="append_portfolio",
             title=f"Append portfolio run #{payload['portfolio_run_id']} through {payload['end_date']}",
             payload=payload,
-            target=self._execute_append_portfolio_job,
         )
 
     def trigger_daily_close_pipeline_job(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return self._start_job(
+        return self._enqueue_job(
             job_type="daily_close_pipeline",
             title=f"Daily close pipeline for {payload['trade_date']}",
             payload=payload,
-            target=self._execute_daily_close_pipeline_job,
         )
 
     def reload_schedule_jobs(self) -> None:
@@ -344,58 +344,39 @@ class RankingBackendService:
             schedule,
             now_local_date=dt.datetime.now(ZoneInfo(str(schedule["timezone"]))).date(),
         )
-        target = (
-            self._execute_daily_close_pipeline_job
-            if request["target_name"] == "daily_close_pipeline"
-            else self._execute_ranking_run_job
-        )
-        self._start_job(
+        self._enqueue_job(
             job_type=str(request["job_type"]),
             title=str(request["title"]),
             payload=dict(request["payload"]),
-            target=target,
             schedule_id=int(request["schedule_id"]),
         )
 
-    def _start_job(
+    def _enqueue_job(
         self,
         *,
         job_type: str,
         title: str,
         payload: dict[str, Any],
-        target: Any,
         schedule_id: int | None = None,
     ) -> dict[str, Any]:
-        if not self._run_lock.acquire(blocking=False):
-            raise BusyError("Another backend run or job is already in progress")
         now = dt.datetime.now(dt.timezone.utc).isoformat()
-        try:
-            job_id = create_job_record(
+        job_id = create_job_record(
+            self.settings.db_path,
+            job_type=job_type,
+            title=title,
+            payload_json=json.dumps(payload, ensure_ascii=True, sort_keys=True),
+            requested_by="web",
+            created_at=now,
+        )
+        if schedule_id is not None:
+            update_schedule_run_state(
                 self.settings.db_path,
-                job_type=job_type,
-                title=title,
-                payload_json=json.dumps(payload, ensure_ascii=True, sort_keys=True),
-                requested_by="web",
-                created_at=now,
+                schedule_id,
+                updated_at=now,
+                last_triggered_at=now,
+                last_run_status="queued",
             )
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=now,
-                    last_triggered_at=now,
-                    last_run_status="queued",
-                )
-            thread = threading.Thread(
-                target=self._execute_job_thread,
-                args=(job_id, target, payload, schedule_id),
-                daemon=True,
-            )
-            thread.start()
-            return self.get_job(job_id)
-        except Exception:
-            self._run_lock.release()
-            raise
+        return self.get_job(job_id)
 
     def _create_run_record(
         self,
@@ -453,335 +434,6 @@ class RankingBackendService:
             self.settings.db_path,
             default_model_id=lgb_model_id,
         )
-
-    def _execute_job_thread(self, job_id: int, target: Any, payload: dict[str, Any], schedule_id: int | None) -> None:
-        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        try:
-            mark_job_running(self.settings.db_path, job_id, started_at)
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=started_at,
-                    last_run_status="running",
-                )
-            target(job_id, payload)
-            finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-            mark_job_finished(self.settings.db_path, job_id, status="succeeded", finished_at=finished_at, error_text=None)
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=finished_at,
-                    last_run_status="succeeded",
-                )
-        except Exception as exc:  # noqa: BLE001
-            finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-            mark_job_finished(self.settings.db_path, job_id, status="failed", finished_at=finished_at, error_text=str(exc))
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=finished_at,
-                    last_run_status="failed",
-                )
-        finally:
-            self._run_lock.release()
-
-    def _execute_ranking_run_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        schedule_id = int(payload["schedule_id"]) if payload.get("schedule_id") is not None else None
-        trigger_source = str(payload["trigger_source"])
-        client_id = int(payload["client_id"])
-        lookback_days = int(payload["lookback_days"])
-        workflow_base = str(payload["workflow_base"])
-        run_id = self._create_run_record(
-            schedule_id=schedule_id,
-            trigger_source=trigger_source,
-            client_id=client_id,
-            lookback_days=lookback_days,
-            workflow_base=workflow_base,
-        )
-        command = [
-            str(self.settings.run_script_path),
-            "--client-id",
-            str(client_id),
-            "--lookback-days",
-            str(lookback_days),
-            "--workflow-base",
-            workflow_base,
-        ]
-        combined_output = self._run_job_step(job_id, "ranking_run", command)
-        self._finalize_run_from_output(run_id, schedule_id, combined_output)
-
-    def _execute_run(self, run_id: int, schedule_id: int | None, command: list[str]) -> None:
-        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        try:
-            mark_run_running(
-                self.settings.db_path,
-                run_id,
-                started_at=started_at,
-            )
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=started_at,
-                    last_run_status="running",
-                )
-
-            proc = subprocess.run(
-                command,
-                cwd=str(self.settings.project_root),
-                text=True,
-                capture_output=True,
-                check=False,
-            )
-            combined_output = "\n".join(
-                part for part in [proc.stdout.strip(), proc.stderr.strip()] if part
-            ).strip()
-
-            if proc.returncode != 0:
-                self._mark_run_failed(run_id, schedule_id, combined_output or "Ranking command failed")
-                return
-
-            artifacts = self._parse_run_output(combined_output)
-            ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
-            finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-            finalize_succeeded_run(
-                db_path=self.settings.db_path,
-                run_id=run_id,
-                ranking_df=ranking_df,
-                signal_date=artifacts["signal_date"],
-                ranking_csv_path=artifacts["ranking_csv_path"],
-                html_report_path=artifacts["html_report_path"],
-                experiment_id=artifacts["experiment_id"],
-                recorder_id=artifacts["recorder_id"],
-                log_output=combined_output,
-                finished_at=finished_at,
-            )
-            if schedule_id is not None:
-                update_schedule_run_state(
-                    self.settings.db_path,
-                    schedule_id,
-                    updated_at=finished_at,
-                    last_run_status="succeeded",
-                )
-        except Exception as exc:  # noqa: BLE001
-            self._mark_run_failed(run_id, schedule_id, str(exc))
-        finally:
-            self._run_lock.release()
-
-    def _execute_refresh_data_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        config_path = str(payload.get("config_path") or "config.yaml")
-        market = str(payload.get("market") or self._market_for_config_path(config_path))
-        command = self._build_refresh_command(
-            market=market,
-            client_id=int(payload["client_id"]),
-            start_date=str(payload["start_date"]),
-            config_path=config_path,
-        )
-        self._run_job_step(job_id, "refresh_data", command)
-
-    def _execute_backfill_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        model = get_model(self.settings.db_path, int(payload["model_id"]))
-        if model is None:
-            raise NotFoundError(f"Model {payload['model_id']} not found")
-        signal_date = str(payload["signal_date"])
-        command = self._build_backfill_command(
-            signal_date=signal_date,
-            workflow_base=str(model["workflow_base"]),
-            model_id=int(model["id"]),
-            client_id=int(payload["client_id"]),
-            config_path=self._config_path_for_model(model),
-        )
-        self._run_job_step(job_id, f"backfill_{model['key']}", command)
-
-    def _execute_append_portfolio_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        command = self._build_append_portfolio_command(
-            portfolio_run_id=int(payload["portfolio_run_id"]),
-            model_id=int(payload["model_id"]) if payload.get("model_id") is not None else None,
-            end_date=str(payload["end_date"]),
-        )
-        self._run_job_step(job_id, f"append_portfolio_{payload['portfolio_run_id']}", command)
-
-    def _execute_daily_close_pipeline_job(self, job_id: int, payload: dict[str, Any]) -> None:
-        trade_date = dt.date.fromisoformat(str(payload["trade_date"]))
-        client_id = int(payload["client_id"])
-        start_date = str(payload["start_date"])
-        include_portfolio = bool(payload.get("include_portfolio", True))
-
-        models = [model for model in list_models(self.settings.db_path) if model.get("workflow_base")]
-        refresh_targets: list[tuple[str, str]] = []
-        seen_refresh_targets: set[tuple[str, str]] = set()
-        for model in models:
-            config_path = self._config_path_for_model(model)
-            market = self._market_for_model(model)
-            refresh_target = (market, config_path)
-            if refresh_target in seen_refresh_targets:
-                continue
-            seen_refresh_targets.add(refresh_target)
-            refresh_targets.append(refresh_target)
-
-        for market, config_path in refresh_targets:
-            step_suffix = Path(config_path).stem
-            step_prefix = "refresh_cn" if market == "cn" else "refresh_data"
-            self._run_job_step(
-                job_id,
-                f"{step_prefix}_{step_suffix}",
-                self._build_refresh_command(
-                    market=market,
-                    client_id=client_id,
-                    start_date=start_date,
-                    config_path=config_path,
-                ),
-            )
-
-        start_bound = dt.date.fromisoformat(start_date)
-        trading_days_by_config: dict[str, list[dt.date]] = {}
-        for model in models:
-            config_path = self._config_path_for_model(model)
-            if config_path not in trading_days_by_config:
-                trading_days_by_config[config_path] = read_available_trading_days(
-                    self.settings.project_root,
-                    config_path=(self.settings.project_root / config_path).resolve(),
-                )
-            missing_days = self._missing_signal_days_for_model(
-                model_id=int(model["id"]),
-                trade_date=trade_date,
-                trading_days=trading_days_by_config[config_path],
-                fallback_start_date=start_bound,
-            )
-            if not missing_days:
-                continue
-            self._run_job_step(
-                job_id,
-                f"backfill_{model['key']}_{missing_days[0].isoformat()}_to_{missing_days[-1].isoformat()}",
-                self._build_bulk_backfill_command(
-                    start_date=missing_days[0].isoformat(),
-                    end_date=missing_days[-1].isoformat(),
-                    workflow_base=str(model["workflow_base"]),
-                    model_id=int(model["id"]),
-                    client_id=client_id,
-                    config_path=self._config_path_for_model(model),
-                ),
-            )
-
-        if not include_portfolio:
-            return
-
-        for model in models:
-            append_end_date = self._previous_trading_day(
-                trade_date,
-                config_path=self._config_path_for_model(model),
-            ).isoformat()
-            portfolio_run = self._latest_portfolio_run_for_model(int(model["id"]))
-            if portfolio_run is None:
-                self._record_job_note(
-                    job_id,
-                    step_name=f"append_{model['key']}_portfolio",
-                    message=f"Skipped portfolio append for model_id={model['id']} ({model['name']}): no portfolio run found yet",
-                )
-                continue
-            self._run_job_step(
-                job_id,
-                f"append_{model['key']}_portfolio",
-                self._build_append_portfolio_command(
-                    portfolio_run_id=int(portfolio_run["id"]),
-                    model_id=int(model["id"]),
-                    end_date=append_end_date,
-                ),
-            )
-
-    def _run_job_step(self, job_id: int, step_name: str, command: list[str]) -> str:
-        started_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        command_text = " ".join(command)
-        step_order = next_job_step_order(self.settings.db_path, job_id)
-        step_id = create_job_step(
-            self.settings.db_path,
-            job_id=job_id,
-            step_order=step_order,
-            step_name=step_name,
-            status="running",
-            command=command_text,
-            started_at=started_at,
-        )
-
-        child_env = os.environ.copy()
-        child_env.setdefault("PYTHONUNBUFFERED", "1")
-        proc = subprocess.Popen(
-            command,
-            cwd=str(self.settings.project_root),
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=child_env,
-            bufsize=1,
-        )
-        assert proc.stdout is not None
-        lines: list[str] = []
-        for line in proc.stdout:
-            clean_line = line.rstrip("\n")
-            lines.append(clean_line)
-            append_job_step_output(self.settings.db_path, step_id=step_id, line=clean_line)
-        rc = proc.wait()
-        combined_output = "\n".join(lines).strip()
-        finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        status = "succeeded" if rc == 0 else "failed"
-        error_text = None if rc == 0 else (combined_output or f"Step failed: {step_name}")
-
-        update_job_step(
-            self.settings.db_path,
-            step_id=step_id,
-            status=status,
-            finished_at=finished_at,
-            log_output=combined_output,
-            error_text=error_text,
-        )
-        append_job_log(self.settings.db_path, job_id=job_id, section_name=step_name, content=combined_output)
-        if rc != 0:
-            raise RuntimeError(error_text or f"Step failed: {step_name}")
-        return combined_output
-
-    def _record_job_note(self, job_id: int, step_name: str, message: str) -> None:
-        now = dt.datetime.now(dt.timezone.utc).isoformat()
-        step_order = next_job_step_order(self.settings.db_path, job_id)
-        create_job_step(
-            self.settings.db_path,
-            job_id=job_id,
-            step_order=step_order,
-            step_name=step_name,
-            status="succeeded",
-            command=message,
-            started_at=now,
-            finished_at=now,
-            log_output=message,
-            error_text=None,
-        )
-        append_job_log(self.settings.db_path, job_id=job_id, section_name=step_name, content=message)
-
-    def _finalize_run_from_output(self, run_id: int, schedule_id: int | None, combined_output: str) -> None:
-        artifacts = self._parse_run_output(combined_output)
-        ranking_df = pd.read_csv(artifacts["ranking_csv_path"])
-        finished_at = dt.datetime.now(dt.timezone.utc).isoformat()
-        finalize_succeeded_run(
-            db_path=self.settings.db_path,
-            run_id=run_id,
-            ranking_df=ranking_df,
-            signal_date=artifacts["signal_date"],
-            ranking_csv_path=artifacts["ranking_csv_path"],
-            html_report_path=artifacts["html_report_path"],
-            experiment_id=artifacts["experiment_id"],
-            recorder_id=artifacts["recorder_id"],
-            log_output=combined_output,
-            finished_at=finished_at,
-        )
-        if schedule_id is not None:
-            update_schedule_run_state(
-                self.settings.db_path,
-                schedule_id,
-                updated_at=finished_at,
-                last_run_status="succeeded",
-            )
 
     def _build_refresh_command(
         self,

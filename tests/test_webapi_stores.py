@@ -15,15 +15,19 @@ from ib_qlib_pipeline.dborm.session import create_session_factory_for_path
 from ib_qlib_pipeline.webapi.db import init_db
 from ib_qlib_pipeline.webapi.job_store import (
     append_job_log,
+    append_job_log_line,
     append_job_step_output,
+    claim_next_queued_job,
     create_job,
     create_job_step,
     get_job,
     list_job_log_lines,
     list_jobs,
-    mark_job_finished,
-    mark_job_running,
+    mark_job_failed_by_worker,
+    mark_job_succeeded_by_worker,
     next_job_step_order,
+    recover_stale_jobs,
+    request_cancel_job,
     update_job_step,
 )
 from ib_qlib_pipeline.webapi.model_store import (
@@ -53,7 +57,13 @@ from ib_qlib_pipeline.webapi.schedule_store import (
     list_schedules,
     update_schedule,
 )
-from ib_qlib_pipeline.webapi.schemas import StrategyCreate, StrategyUpdate, UniverseCreate, UniverseUpdate
+from ib_qlib_pipeline.webapi.schemas import (
+    JobCancelRequest,
+    StrategyCreate,
+    StrategyUpdate,
+    UniverseCreate,
+    UniverseUpdate,
+)
 from ib_qlib_pipeline.webapi.service import RankingBackendService
 from ib_qlib_pipeline.webapi.settings import Settings
 from ib_qlib_pipeline.webapi.strategy_store import (
@@ -495,7 +505,7 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(get_model_by_key(self.db_path, "lgb")["id"], run["model_id"])
         self.assertEqual("LightGBM_Default", run["model_name"])
 
-    def test_service_start_job_marks_schedule_queued(self) -> None:
+    def test_service_enqueue_job_marks_schedule_queued(self) -> None:
         service = self._make_service()
         schedule = create_schedule(
             self.db_path,
@@ -515,249 +525,48 @@ class StoreTestCase(unittest.TestCase):
             },
             "examples/workflow_us_lgb_2020_port.yaml",
         )
-
-        class FakeThread:
-            def __init__(self, *args, **kwargs) -> None:
-                self.args = args
-                self.kwargs = kwargs
-
-            def start(self) -> None:
-                return None
-
-        with patch("ib_qlib_pipeline.webapi.service.threading.Thread", FakeThread):
-            job = service._start_job(
-                job_type="refresh_data",
-                title="Refresh",
-                payload={"start_date": "2026-05-01", "client_id": 151},
-                target=lambda *_args, **_kwargs: None,
-                schedule_id=schedule["id"],
-            )
+        job = service._enqueue_job(
+            job_type="refresh_data",
+            title="Refresh",
+            payload={"start_date": "2026-05-01", "client_id": 151},
+            schedule_id=schedule["id"],
+        )
 
         updated_schedule = get_schedule(self.db_path, schedule["id"])
         self.assertEqual("queued", job["status"])
         self.assertEqual("queued", updated_schedule["last_run_status"])
         self.assertIsNotNone(updated_schedule["last_triggered_at"])
-        if service._run_lock.locked():
-            service._run_lock.release()
 
-    def test_service_execute_job_thread_success_updates_schedule_and_releases_lock(self) -> None:
+    def test_service_cancel_job_marks_queued_job_canceled(self) -> None:
         service = self._make_service()
-        schedule = create_schedule(
-            self.db_path,
-            {
-                "name": "ranking",
-                "schedule_type": "ranking",
-                "enabled": True,
-                "timezone": "America/Denver",
-                "day_of_week": "mon-fri",
-                "hour": 14,
-                "minute": 40,
-                "client_id": 151,
-                "lookback_days": 7,
-                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
-                "pipeline_start_date": None,
-                "pipeline_include_portfolio": True,
-            },
-            "examples/workflow_us_lgb_2020_port.yaml",
-        )
         job_id = create_job(
             self.db_path,
             job_type="refresh_data",
             title="Refresh",
             payload_json='{"start_date":"2026-05-01","client_id":151}',
         )
+        item = service.cancel_job(job_id)
+        self.assertEqual("canceled", item["status"])
+        self.assertEqual("user requested", item["cancel_reason"])
 
-        service._run_lock.acquire()
-        service._execute_job_thread(
-            job_id,
-            target=lambda *_args, **_kwargs: None,
-            payload={"start_date": "2026-05-01", "client_id": 151},
-            schedule_id=schedule["id"],
-        )
-
-        job = get_job(self.db_path, job_id)
-        updated_schedule = get_schedule(self.db_path, schedule["id"])
-        self.assertEqual("succeeded", job["status"])
-        self.assertEqual("succeeded", updated_schedule["last_run_status"])
-        self.assertFalse(service._run_lock.locked())
-
-    def test_service_finalize_run_from_output_updates_run_and_recommendations(self) -> None:
+    def test_service_cancel_job_marks_running_job_cancel_requested(self) -> None:
         service = self._make_service()
-        schedule = create_schedule(
+        job_id = create_job(
             self.db_path,
-            {
-                "name": "ranking",
-                "schedule_type": "ranking",
-                "enabled": True,
-                "timezone": "America/Denver",
-                "day_of_week": "mon-fri",
-                "hour": 14,
-                "minute": 40,
-                "client_id": 151,
-                "lookback_days": 7,
-                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
-                "pipeline_start_date": None,
-                "pipeline_include_portfolio": True,
-            },
-            "examples/workflow_us_lgb_2020_port.yaml",
+            job_type="refresh_data",
+            title="Refresh",
+            payload_json='{"start_date":"2026-05-01","client_id":151}',
         )
-        run_id = service._create_run_record(
-            schedule_id=schedule["id"],
-            trigger_source="schedule",
-            client_id=151,
-            lookback_days=7,
-            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
-        )
-
-        ranking_csv = self.project_root / "tmp_test_finalize_ranking.csv"
-        try:
-            pd.DataFrame(
-                [
-                    {
-                        "rank": 1,
-                        "symbol": "AAPL",
-                        "score": 0.12,
-                        "percentile": 99.0,
-                        "close": 210.0,
-                        "signal_date": "2026-05-06",
-                    },
-                    {
-                        "rank": 2,
-                        "symbol": "MSFT",
-                        "score": 0.11,
-                        "percentile": 98.0,
-                        "close": 310.0,
-                        "signal_date": "2026-05-06",
-                    },
-                ]
-            ).to_csv(ranking_csv, index=False)
-
-            output = "\n".join(
-                [
-                    f"[ok] ranking exported: {ranking_csv}",
-                    "[ok] html report exported: reports/test.html",
-                    "[ok] signal_date=2026-05-06 rows=2 missing_close=0",
-                    "[ok] experiment_id=exp-test recorder_id=rec-test",
-                ]
-            )
-            service._finalize_run_from_output(run_id, schedule["id"], output)
-
-            run = service.get_run(run_id)
-            recs = service.get_run_recommendations(run_id)
-            updated_schedule = get_schedule(self.db_path, schedule["id"])
-            self.assertEqual("succeeded", run["status"])
-            self.assertEqual("2026-05-06", run["signal_date"])
-            self.assertEqual(2, run["row_count"])
-            self.assertEqual(2, len(recs))
-            self.assertEqual("AAPL", recs[0]["symbol"])
-            self.assertEqual("succeeded", updated_schedule["last_run_status"])
-        finally:
-            if ranking_csv.exists():
-                ranking_csv.unlink()
-
-    def test_service_execute_run_success_updates_run_and_schedule(self) -> None:
-        service = self._make_service()
-        schedule = create_schedule(
+        claimed = claim_next_queued_job(
             self.db_path,
-            {
-                "name": "ranking",
-                "schedule_type": "ranking",
-                "enabled": True,
-                "timezone": "America/Denver",
-                "day_of_week": "mon-fri",
-                "hour": 14,
-                "minute": 40,
-                "client_id": 151,
-                "lookback_days": 7,
-                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
-                "pipeline_start_date": None,
-                "pipeline_include_portfolio": True,
-            },
-            "examples/workflow_us_lgb_2020_port.yaml",
+            worker_id="worker-1",
+            pid=123,
+            now="2026-05-07T00:00:00Z",
         )
-        run_id = service._create_run_record(
-            schedule_id=schedule["id"],
-            trigger_source="schedule",
-            client_id=151,
-            lookback_days=7,
-            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
-        )
-        ranking_csv = self.project_root / "tmp_test_execute_run.csv"
-        try:
-            pd.DataFrame(
-                [
-                    {
-                        "rank": 1,
-                        "symbol": "AAPL",
-                        "score": 0.12,
-                        "percentile": 99.0,
-                        "close": 210.0,
-                        "signal_date": "2026-05-06",
-                    }
-                ]
-            ).to_csv(ranking_csv, index=False)
-            output = "\n".join(
-                [
-                    f"[ok] ranking exported: {ranking_csv}",
-                    "[ok] html report exported: reports/test.html",
-                    "[ok] signal_date=2026-05-06 rows=1 missing_close=0",
-                    "[ok] experiment_id=exp-test recorder_id=rec-test",
-                ]
-            )
-            proc = SimpleNamespace(returncode=0, stdout=output, stderr="")
-            service._run_lock.acquire()
-            with patch("ib_qlib_pipeline.webapi.service.subprocess.run", return_value=proc):
-                service._execute_run(run_id, schedule["id"], ["dummy"])
-
-            run = service.get_run(run_id)
-            updated_schedule = get_schedule(self.db_path, schedule["id"])
-            recs = service.get_run_recommendations(run_id)
-            self.assertEqual("succeeded", run["status"])
-            self.assertEqual("succeeded", updated_schedule["last_run_status"])
-            self.assertEqual(1, len(recs))
-            self.assertFalse(service._run_lock.locked())
-        finally:
-            if ranking_csv.exists():
-                ranking_csv.unlink()
-
-    def test_service_execute_run_failure_updates_run_and_schedule(self) -> None:
-        service = self._make_service()
-        schedule = create_schedule(
-            self.db_path,
-            {
-                "name": "ranking",
-                "schedule_type": "ranking",
-                "enabled": True,
-                "timezone": "America/Denver",
-                "day_of_week": "mon-fri",
-                "hour": 14,
-                "minute": 40,
-                "client_id": 151,
-                "lookback_days": 7,
-                "workflow_base": "examples/workflow_us_lgb_2020_port.yaml",
-                "pipeline_start_date": None,
-                "pipeline_include_portfolio": True,
-            },
-            "examples/workflow_us_lgb_2020_port.yaml",
-        )
-        run_id = service._create_run_record(
-            schedule_id=schedule["id"],
-            trigger_source="schedule",
-            client_id=151,
-            lookback_days=7,
-            workflow_base="examples/workflow_us_lgb_2020_port.yaml",
-        )
-        proc = SimpleNamespace(returncode=1, stdout="", stderr="boom")
-        service._run_lock.acquire()
-        with patch("ib_qlib_pipeline.webapi.service.subprocess.run", return_value=proc):
-            service._execute_run(run_id, schedule["id"], ["dummy"])
-
-        run = service.get_run(run_id)
-        updated_schedule = get_schedule(self.db_path, schedule["id"])
-        self.assertEqual("failed", run["status"])
-        self.assertEqual("boom", run["error_text"])
-        self.assertEqual("failed", updated_schedule["last_run_status"])
-        self.assertFalse(service._run_lock.locked())
+        self.assertIsNotNone(claimed)
+        item = service.cancel_job(job_id, reason="stop now")
+        self.assertEqual("cancel_requested", item["status"])
+        self.assertEqual("stop now", item["cancel_reason"])
 
     def test_portfolio_store_lifecycle(self) -> None:
         run_id = self._insert_completed_run()
@@ -880,7 +689,13 @@ class StoreTestCase(unittest.TestCase):
             title="Daily Close",
             payload_json="{}",
         )
-        mark_job_running(self.db_path, job_id, "2026-05-07T00:00:00Z")
+        claimed = claim_next_queued_job(
+            self.db_path,
+            worker_id="worker-1",
+            pid=222,
+            now="2026-05-07T00:00:00Z",
+        )
+        self.assertIsNotNone(claimed)
         step_id = create_job_step(
             self.db_path,
             job_id=job_id,
@@ -901,17 +716,16 @@ class StoreTestCase(unittest.TestCase):
             error_text=None,
         )
         append_job_log(self.db_path, job_id=job_id, section_name="refresh_data", content="line1\nline2")
-        mark_job_finished(
+        mark_job_succeeded_by_worker(
             self.db_path,
             job_id,
-            status="succeeded",
             finished_at="2026-05-07T00:00:03Z",
-            error_text=None,
+            worker_id="worker-1",
         )
 
         jobs = list_jobs(self.db_path)
         job = get_job(self.db_path, job_id)
-        log_lines = list_job_log_lines(self.db_path, job_id=job_id)
+        log_lines = list_job_log_lines(self.db_path, job_id=job_id)["lines"]
         self.assertEqual(1, len(jobs))
         self.assertEqual("succeeded", job["status"])
         self.assertEqual(1, len(job["steps"]))
@@ -920,6 +734,125 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(5, len(log_lines))
         self.assertEqual("line1", log_lines[0]["content"])
         self.assertEqual("[refresh_data]", log_lines[2]["content"])
+
+    def test_job_store_claim_cancel_recover_and_log_lines(self) -> None:
+        job_id = create_job(
+            self.db_path,
+            job_type="refresh_data",
+            title="Daily Close",
+            payload_json="{}",
+        )
+        first = claim_next_queued_job(
+            self.db_path,
+            worker_id="worker-1",
+            pid=101,
+            now="2026-05-07T00:00:00Z",
+        )
+        second = claim_next_queued_job(
+            self.db_path,
+            worker_id="worker-2",
+            pid=102,
+            now="2026-05-07T00:00:01Z",
+        )
+        self.assertIsNotNone(first)
+        self.assertIsNone(second)
+
+        item = request_cancel_job(
+            self.db_path,
+            job_id,
+            reason="user requested",
+            now="2026-05-07T00:00:02Z",
+        )
+        self.assertIsNotNone(item)
+        self.assertEqual("cancel_requested", item["status"])
+
+        stale = recover_stale_jobs(
+            self.db_path,
+            stale_before="2026-05-07T00:01:00Z",
+            now="2026-05-07T00:02:00Z",
+        )
+        self.assertEqual(1, stale)
+        job = get_job(self.db_path, job_id)
+        self.assertEqual("canceled", job["status"])
+
+        queued_job_id = create_job(
+            self.db_path,
+            job_type="refresh_data",
+            title="Queued",
+            payload_json="{}",
+        )
+        queued_cancel = request_cancel_job(
+            self.db_path,
+            queued_job_id,
+            reason="drop it",
+            now="2026-05-07T00:03:00Z",
+        )
+        self.assertIsNotNone(queued_cancel)
+        self.assertEqual("canceled", queued_cancel["status"])
+
+        line1_id = append_job_log_line(
+            self.db_path,
+            job_id=queued_job_id,
+            step_id=None,
+            content="hello",
+            stream="stdout",
+            created_at="2026-05-07T00:03:01Z",
+        )
+        append_job_log_line(
+            self.db_path,
+            job_id=queued_job_id,
+            step_id=None,
+            content="world",
+            stream="stderr",
+            created_at="2026-05-07T00:03:02Z",
+        )
+        page = list_job_log_lines(self.db_path, job_id=queued_job_id, after_id=0, limit=1)
+        self.assertEqual(1, len(page["lines"]))
+        self.assertEqual("hello", page["lines"][0]["content"])
+        page2 = list_job_log_lines(self.db_path, job_id=queued_job_id, after_id=line1_id, limit=10)
+        self.assertEqual(1, len(page2["lines"]))
+        self.assertEqual("world", page2["lines"][0]["content"])
+
+    def test_job_api_cancel_and_log_lines(self) -> None:
+        app = self._make_app()
+        route_map = {
+            (route.path, tuple(sorted(getattr(route, "methods", [])))): route.endpoint
+            for route in app.routes
+            if hasattr(route, "endpoint")
+        }
+        cancel_endpoint = route_map[("/api/jobs/{job_id}/cancel", ("POST",))]
+        log_lines_endpoint = route_map[("/api/jobs/{job_id}/log-lines", ("GET",))]
+
+        job_id = create_job(
+            self.db_path,
+            job_type="refresh_data",
+            title="Queued",
+            payload_json="{}",
+        )
+        append_job_log_line(
+            self.db_path,
+            job_id=job_id,
+            step_id=None,
+            content="first",
+            stream="stdout",
+            created_at="2026-05-07T00:03:01Z",
+        )
+        append_job_log_line(
+            self.db_path,
+            job_id=job_id,
+            step_id=None,
+            content="second",
+            stream="stdout",
+            created_at="2026-05-07T00:03:02Z",
+        )
+
+        lines = log_lines_endpoint(job_id, after_id=0, limit=1)
+        self.assertEqual(1, len(lines["lines"]))
+        self.assertEqual("first", lines["lines"][0]["content"])
+
+        canceled = cancel_endpoint(job_id, JobCancelRequest(reason="stop"))
+        self.assertEqual("canceled", canceled["status"])
+        self.assertEqual("stop", canceled["cancel_reason"])
 
     def test_service_command_builders(self) -> None:
         service = self._make_service()
@@ -1120,7 +1053,7 @@ class StoreTestCase(unittest.TestCase):
 
     def test_service_trigger_methods_build_expected_jobs(self) -> None:
         service = self._make_service()
-        with patch.object(service, "_start_job", return_value={"id": 123}) as start_job:
+        with patch.object(service, "_enqueue_job", return_value={"id": 123}) as start_job:
             result = service.trigger_manual_run(
                 {"client_id": 151, "lookback_days": 7, "workflow_base": "examples/workflow_us_lgb_2020_port.yaml"}
             )
@@ -1130,14 +1063,14 @@ class StoreTestCase(unittest.TestCase):
             self.assertEqual("manual_ranking_run", kwargs["job_type"])
             self.assertEqual("manual", kwargs["payload"]["trigger_source"])
 
-        with patch.object(service, "_start_job", return_value={"id": 124}) as start_job:
+        with patch.object(service, "_enqueue_job", return_value={"id": 124}) as start_job:
             result = service.trigger_backfill_job({"signal_date": "2026-05-06", "model_id": 1, "client_id": 151})
             self.assertEqual({"id": 124}, result)
             kwargs = start_job.call_args.kwargs
             self.assertEqual("backfill_ranking", kwargs["job_type"])
             self.assertIn("LightGBM_Default", kwargs["title"])
 
-        with patch.object(service, "_start_job", return_value={"id": 125}) as start_job:
+        with patch.object(service, "_enqueue_job", return_value={"id": 125}) as start_job:
             result = service.trigger_append_portfolio_job({"portfolio_run_id": 4, "model_id": 1, "end_date": "2026-05-06"})
             self.assertEqual({"id": 125}, result)
             kwargs = start_job.call_args.kwargs
@@ -1169,7 +1102,7 @@ class StoreTestCase(unittest.TestCase):
             self.assertEqual({"id": 202}, result)
             target.assert_called_once()
 
-        with patch.object(service, "_start_job", return_value={"id": 203}) as target:
+        with patch.object(service, "_enqueue_job", return_value={"id": 203}) as target:
             job_id = create_job(
                 self.db_path,
                 job_type="scheduled_ranking_run",
@@ -1260,7 +1193,7 @@ class StoreTestCase(unittest.TestCase):
         fake_now = dt.datetime(2026, 5, 7, 14, 40, tzinfo=dt.timezone.utc)
         with (
             patch("ib_qlib_pipeline.webapi.service.dt.datetime") as mock_datetime,
-            patch.object(service, "_start_job", return_value={"id": 301}) as start_job,
+            patch.object(service, "_enqueue_job", return_value={"id": 301}) as start_job,
         ):
             mock_datetime.now.return_value = fake_now
             service._trigger_scheduled_run(schedule["id"])
@@ -1292,7 +1225,7 @@ class StoreTestCase(unittest.TestCase):
             "examples/workflow_us_lgb_2020_port.yaml",
         )
 
-        with patch.object(service, "_start_job", return_value={"id": 302}) as start_job:
+        with patch.object(service, "_enqueue_job", return_value={"id": 302}) as start_job:
             service._trigger_scheduled_run(schedule["id"])
 
         kwargs = start_job.call_args.kwargs
@@ -1300,79 +1233,6 @@ class StoreTestCase(unittest.TestCase):
         self.assertEqual(schedule["id"], kwargs["schedule_id"])
         self.assertEqual("schedule", kwargs["payload"]["trigger_source"])
         self.assertEqual(schedule["workflow_base"], kwargs["payload"]["workflow_base"])
-
-    def test_service_execute_daily_close_pipeline_job_orchestrates_models(self) -> None:
-        service = self._make_service()
-        models = [
-            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml", "universe_id": 1, "universe_key": "sp500"},
-            {"id": 2, "key": "xgb_union", "name": "XGBoost_Default_Union", "workflow_base": "examples/workflow_us_xgb_2020_port.yaml", "universe_id": 2, "universe_key": "us_union_sp500_ndx_djia_sox"},
-            {"id": 185, "key": "cat_cn1", "name": "CAT_CN1", "workflow_base": "examples/wf_cat_cn1.yaml", "universe_id": 4, "universe_key": "cn_csi800", "details": {"config_path": "config_cn.yaml"}},
-        ]
-        payload = {
-            "trade_date": "2026-05-06",
-            "client_id": 151,
-            "start_date": "2026-05-01",
-            "include_portfolio": True,
-        }
-
-        with (
-            patch("ib_qlib_pipeline.webapi.service.list_models", return_value=models),
-            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", side_effect=[
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-                [dt.date(2026, 5, 5), dt.date(2026, 5, 6)],
-            ]),
-            patch.object(service, "_missing_signal_days_for_model", side_effect=[[dt.date(2026, 5, 5)], [dt.date(2026, 5, 5), dt.date(2026, 5, 6)], [dt.date(2026, 5, 6)]]),
-            patch.object(service, "_latest_portfolio_run_for_model", side_effect=[{"id": 11, "model_id": 1}, None, {"id": 22, "model_id": 185}]),
-            patch.object(service, "_run_job_step", return_value="ok") as run_job_step,
-            patch.object(service, "_record_job_note") as record_note,
-        ):
-            service._execute_daily_close_pipeline_job(901, payload)
-
-        called_steps = [call.args[1] for call in run_job_step.call_args_list]
-        self.assertEqual(
-            [
-                "refresh_data_config",
-                "refresh_data_config_union",
-                "refresh_cn_config_cn",
-                "backfill_lgb_2026-05-05_to_2026-05-05",
-                "backfill_xgb_union_2026-05-05_to_2026-05-06",
-                "backfill_cat_cn1_2026-05-06_to_2026-05-06",
-                "append_lgb_portfolio",
-                "append_cat_cn1_portfolio",
-            ],
-            called_steps,
-        )
-        record_note.assert_called_once()
-        self.assertIn("append_xgb_union_portfolio", record_note.call_args.kwargs["step_name"])
-
-    def test_service_execute_daily_close_pipeline_job_skips_portfolio_when_disabled(self) -> None:
-        service = self._make_service()
-        models = [
-            {"id": 1, "key": "lgb", "name": "LightGBM_Default", "workflow_base": "examples/workflow_us_lgb_2020_port.yaml", "universe_id": 1, "universe_key": "sp500"},
-        ]
-        payload = {
-            "trade_date": "2026-05-06",
-            "client_id": 151,
-            "start_date": "2026-05-01",
-            "include_portfolio": False,
-        }
-
-        with (
-            patch("ib_qlib_pipeline.webapi.service.list_models", return_value=models),
-            patch("ib_qlib_pipeline.webapi.service.read_available_trading_days", return_value=[dt.date(2026, 5, 6)]),
-            patch.object(service, "_missing_signal_days_for_model", return_value=[dt.date(2026, 5, 6)]),
-            patch.object(service, "_run_job_step", return_value="ok") as run_job_step,
-            patch.object(service, "_latest_portfolio_run_for_model") as latest_portfolio,
-        ):
-            service._execute_daily_close_pipeline_job(902, payload)
-
-        called_steps = [call.args[1] for call in run_job_step.call_args_list]
-        self.assertEqual(["refresh_data_config", "backfill_lgb_2026-05-06_to_2026-05-06"], called_steps)
-        latest_portfolio.assert_not_called()
 
     def test_service_config_path_for_model_uses_universe_details(self) -> None:
         service = self._make_service()

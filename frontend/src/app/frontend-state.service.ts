@@ -11,7 +11,7 @@ function localDateIso(): string {
   return `${year}-${month}-${day}`;
 }
 
-export type RunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type RunStatus = 'queued' | 'running' | 'cancel_requested' | 'canceled' | 'succeeded' | 'failed';
 
 export interface BackendConfig {
   project_root: string;
@@ -86,10 +86,21 @@ export interface JobStep {
   error_text?: string | null;
 }
 
+export interface JobLogLine {
+  id: number;
+  job_id: number;
+  step_id: number | null;
+  line_no: number;
+  stream?: string | null;
+  content: string;
+  created_at: string;
+}
+
 export interface JobDetail extends JobSummary {
   payload_json?: string | null;
   log_output?: string | null;
   steps: JobStep[];
+  log_lines?: JobLogLine[];
 }
 
 export interface OperationsSummaryModel {
@@ -402,10 +413,14 @@ export class FrontendStateService {
   async loadJobs(): Promise<void> {
     this.jobsLoading.set(true);
     try {
-      const previousRunning = this.jobs().some((job) => job.status === 'queued' || job.status === 'running');
+      const previousRunning = this.jobs().some(
+        (job) => job.status === 'queued' || job.status === 'running' || job.status === 'cancel_requested',
+      );
       const jobs = await firstValueFrom(this.http.get<JobSummary[]>('/api/jobs', { params: { limit: 40 } }));
       this.jobs.set(jobs ?? []);
-      const currentRunning = (jobs ?? []).some((job) => job.status === 'queued' || job.status === 'running');
+      const currentRunning = (jobs ?? []).some(
+        (job) => job.status === 'queued' || job.status === 'running' || job.status === 'cancel_requested',
+      );
       const selected = this.selectedJobId();
       if (selected !== null) {
         await this.selectJob(selected);
@@ -426,7 +441,7 @@ export class FrontendStateService {
     this.selectedJobId.set(jobId);
     try {
       const detail = await firstValueFrom(this.http.get<JobDetail>(`/api/jobs/${jobId}`));
-      this.selectedJobDetail.set(detail ?? null);
+      this.selectedJobDetail.set(detail ? { ...detail, log_lines: detail.log_lines ?? [] } : null);
     } catch {
       this.selectedJobDetail.set(null);
       this.jobActionError.set(this.i18n.t('failedJobDetail'));
@@ -560,6 +575,19 @@ export class FrontendStateService {
       }
     } catch (error: any) {
       this.jobActionError.set(error?.error?.detail || this.i18n.t('failedRetryJob'));
+    }
+  }
+
+  async cancelJob(jobId: number, reason = 'user requested'): Promise<void> {
+    this.jobActionError.set(null);
+    try {
+      const job = await firstValueFrom(this.http.post<JobSummary>(`/api/jobs/${jobId}/cancel`, { reason }));
+      await this.loadJobs();
+      if (job?.id) {
+        await this.selectJob(job.id);
+      }
+    } catch (error: any) {
+      this.jobActionError.set(error?.error?.detail || this.i18n.t('failedTriggerJob'));
     }
   }
 

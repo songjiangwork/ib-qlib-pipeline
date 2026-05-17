@@ -60,7 +60,9 @@ export class OperationsPage implements OnInit, OnDestroy {
   @ViewChildren('liveLog') private liveLogs!: QueryList<ElementRef<HTMLElement>>;
 
   protected readonly runningJobs = computed(() =>
-    this.state.jobs().filter((job) => job.status === 'queued' || job.status === 'running'),
+    this.state.jobs().filter(
+      (job) => job.status === 'queued' || job.status === 'running' || job.status === 'cancel_requested',
+    ),
   );
   protected readonly operationsModels = computed(() => this.state.operationsSummary()?.models ?? []);
 
@@ -88,15 +90,13 @@ export class OperationsPage implements OnInit, OnDestroy {
 
   ngAfterViewChecked(): void {
     const detail = this.state.selectedJobDetail();
-    if (detail?.status !== 'running' && detail?.status !== 'queued') {
+    if (detail?.status !== 'running' && detail?.status !== 'queued' && detail?.status !== 'cancel_requested') {
       this.lastAutoScrollSignature = null;
       this.autoFollowLogs = true;
       return;
     }
     const steps = detail.steps ?? [];
-    const signature = `${detail.id}:${detail.status}:${steps
-      .map((step) => `${step.id}:${step.log_output?.length ?? 0}`)
-      .join('|')}`;
+    const signature = `${detail.id}:${detail.status}:${steps.map((step) => `${step.id}:${step.status}:${step.log_output?.length ?? 0}`).join('|')}`;
     if (signature === this.lastAutoScrollSignature) {
       return;
     }
@@ -165,6 +165,24 @@ export class OperationsPage implements OnInit, OnDestroy {
       return;
     }
     await this.state.retryJob(jobId);
+  }
+
+  protected async cancelSelectedJob(): Promise<void> {
+    const jobId = this.state.selectedJobId();
+    if (jobId === null) {
+      return;
+    }
+    await this.state.cancelJob(jobId);
+  }
+
+  protected canCancelSelectedJob(): boolean {
+    const status = this.state.selectedJobDetail()?.status;
+    return status === 'queued' || status === 'running' || status === 'cancel_requested';
+  }
+
+  protected canRetrySelectedJob(): boolean {
+    const status = this.state.selectedJobDetail()?.status;
+    return status === 'failed' || status === 'canceled';
   }
 
   protected isActiveStep(stepStatus: string, stepOrder: number): boolean {

@@ -71,6 +71,10 @@ class DailyClosePipelineJobRequest(BaseModel):
     include_portfolio: bool = True
 
 
+class JobCancelRequest(BaseModel):
+    reason: str | None = Field(default=None, max_length=500)
+
+
 class UniverseCreate(BaseModel):
     key: str = Field(min_length=1, max_length=120)
     name: str = Field(min_length=1, max_length=160)

@@ -20,6 +20,7 @@ from .instrument_store import get_instrument_by_symbol, get_instruments_by_symbo
 from .schemas import (
     DataRefreshJobRequest,
     DailyClosePipelineJobRequest,
+    JobCancelRequest,
     ManualRunRequest,
     PortfolioAppendJobRequest,
     RankingBackfillJobRequest,
@@ -154,6 +155,24 @@ def create_app() -> FastAPI:
     def get_job(job_id: int) -> dict[str, Any]:
         try:
             return get_service().get_job(job_id)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/jobs/{job_id}/log-lines")
+    def get_job_log_lines(
+        job_id: int,
+        after_id: int = Query(default=0, ge=0),
+        limit: int = Query(default=500, ge=1, le=2000),
+    ) -> dict[str, Any]:
+        try:
+            return get_service().list_job_log_lines(job_id, after_id=after_id, limit=limit)
+        except NotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/api/jobs/{job_id}/cancel")
+    def cancel_job(job_id: int, payload: JobCancelRequest) -> dict[str, Any]:
+        try:
+            return get_service().cancel_job(job_id, reason=payload.reason or "user requested")
         except NotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
